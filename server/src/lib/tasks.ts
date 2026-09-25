@@ -1,0 +1,65 @@
+import { Prisma } from '@prisma/client'
+import { prisma } from './prisma'
+import { basicUser } from './serialize'
+
+export const userSelect = {
+  id: true,
+  nombre: true,
+  apellidos: true,
+  email: true,
+  avatarColor: true,
+  avatarUrl: true,
+  esOnline: true,
+} satisfies Prisma.UsuarioSelect
+
+export const taskDetailInclude = {
+  etiquetas: { include: { etiqueta: true } },
+  asignaciones: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { usuario: { select: userSelect } },
+  },
+  checklist: { orderBy: { posicion: 'asc' as const } },
+} satisfies Prisma.TareaInclude
+
+export type TaskDetailRow = Prisma.TareaGetPayload<{ include: typeof taskDetailInclude }>
+
+export function memberDto(m: {
+  usuario: Prisma.UsuarioGetPayload<{ select: typeof userSelect }>
+  rol?: string
+}) {
+  return {
+    ...basicUser(m.usuario),
+    rol: m.rol ?? 'MIEMBRO',
+    online: m.usuario.esOnline ?? false,
+  }
+}
+
+export function serializeTaskDetail(t: TaskDetailRow) {
+  return {
+    id: t.id,
+    titulo: t.titulo,
+    descripcion: t.descripcion,
+    prioridad: t.prioridad,
+    fechaVencimiento: t.fechaVencimiento?.toISOString() ?? null,
+    posicion: t.posicion,
+    createdAt: t.createdAt.toISOString(),
+    etiquetas: t.etiquetas.map((e) => ({
+      id: e.etiqueta.id,
+      texto: e.etiqueta.texto,
+      color: e.etiqueta.color,
+    })),
+    asignaciones: t.asignaciones.map((a) => memberDto(a)),
+    checklist: t.checklist.map((c) => ({
+      id: c.id,
+      texto: c.texto,
+      hecho: c.hecho,
+      posicion: c.posicion,
+    })),
+  }
+}
+
+export async function isBoardMember(boardId: string, usuarioId: string) {
+  return prisma.tableroMiembro.findUnique({
+    where: { tableroId_usuarioId: { tableroId: boardId, usuarioId } },
+  })
+}
