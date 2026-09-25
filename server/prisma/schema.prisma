@@ -1,0 +1,275 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum EstadoUsuario {
+  ACTIVO
+  INACTIVO
+}
+
+enum PlantillaTablero {
+  PROYECTO
+  SPRINT
+  TAREAS
+  VACIO
+}
+
+enum RolTablero {
+  ADMINISTRADOR
+  MIEMBRO
+  EDITOR
+  LECTURA
+}
+
+enum Prioridad {
+  ALTA
+  MEDIA
+  BAJA
+}
+
+enum EstadoInvitacion {
+  PENDIENTE
+  ACEPTADA
+  RECHAZADA
+}
+
+model Usuario {
+  id            String        @id @default(uuid()) @db.VarChar(36)
+  nombre        String        @db.VarChar(100)
+  apellidos     String        @db.VarChar(150)
+  email         String        @unique @db.VarChar(255)
+  passwordHash  String        @map("password_hash") @db.VarChar(255)
+  avatarUrl     String?       @map("avatar_url") @db.VarChar(255)
+  avatarColor   String        @default("#6366f1") @map("avatar_color") @db.VarChar(7)
+  bio           String?       @db.Text
+  estado        EstadoUsuario @default(ACTIVO)
+  esOnline      Boolean       @default(false) @map("es_online")
+  ultimoVistoAt DateTime?     @map("ultimo_visto_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  tablerosCreados   Tablero[]                  @relation("TableroCreadoPor")
+  tableros          TableroMiembro[]
+  favoritosTableros FavoritoTablero[]
+  tareasCreadas     Tarea[]                    @relation("TareaCreadaPor")
+  tareasAsignadas   TareaAsignacion[]
+  conversaciones    ConversacionParticipante[]
+  mensajes          Mensaje[]                  @relation("MensajeAutor")
+  invitacionesEnviadas   Invitacion[]          @relation("InvitacionCreador")
+  invitacionesRecibidas  Invitacion[]          @relation("InvitacionUsuario")
+
+  @@map("usuarios")
+}
+
+model Tablero {
+  id          String           @id @default(uuid()) @db.VarChar(36)
+  nombre      String           @db.VarChar(150)
+  descripcion String?          @db.VarChar(255)
+  color       String           @default("#6366f1") @db.VarChar(7)
+  plantilla   PlantillaTablero @default(PROYECTO)
+  esPrivado   Boolean          @default(false) @map("es_privado")
+  creadoPorId String           @map("creado_por_id") @db.VarChar(36)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  creadoPor Usuario           @relation("TableroCreadoPor", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  columnas  Columna[]
+  miembros  TableroMiembro[]
+  etiquetas Etiqueta[]
+  favoritos FavoritoTablero[]
+  invitaciones Invitacion[]
+
+  @@map("tableros")
+}
+
+model Invitacion {
+  id          String           @id @default(uuid()) @db.VarChar(36)
+  tableroId   String           @map("tablero_id") @db.VarChar(36)
+  usuarioId   String           @map("usuario_id") @db.VarChar(36)
+  creadoPorId String           @map("creado_por_id") @db.VarChar(36)
+  rol         RolTablero       @default(MIEMBRO)
+  estado      EstadoInvitacion @default(PENDIENTE)
+  mensaje     String?          @db.VarChar(500)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  respondidaAt DateTime?       @map("respondida_at")
+
+  tablero   Tablero  @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  usuario   Usuario  @relation("InvitacionUsuario", fields: [usuarioId], references: [id], onDelete: Cascade)
+  creadoPor Usuario  @relation("InvitacionCreador", fields: [creadoPorId], references: [id], onDelete: Cascade)
+
+  @@unique([tableroId, usuarioId])
+  @@index([usuarioId, estado])
+  @@index([tableroId])
+  @@map("invitaciones")
+}
+
+model TableroMiembro {
+  tableroId String     @map("tablero_id") @db.VarChar(36)
+  usuarioId String     @map("usuario_id") @db.VarChar(36)
+  rol       RolTablero @default(MIEMBRO)
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  tablero Tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([tableroId, usuarioId])
+  @@unique([tableroId, usuarioId])
+  @@index([usuarioId])
+  @@map("tablero_miembros")
+}
+
+model Columna {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  tableroId String   @map("tablero_id") @db.VarChar(36)
+  titulo    String   @db.VarChar(100)
+  color     String   @default("#94a3b8") @db.VarChar(7)
+  posicion  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tablero Tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  tareas  Tarea[]
+
+  @@index([tableroId])
+  @@map("columnas")
+}
+
+model Tarea {
+  id               String    @id @default(uuid()) @db.VarChar(36)
+  columnaId        String    @map("columna_id") @db.VarChar(36)
+  creadoPorId      String?   @map("creado_por_id") @db.VarChar(36)
+  titulo           String    @db.VarChar(255)
+  descripcion      String?   @db.Text
+  prioridad        Prioridad @default(MEDIA)
+  fechaVencimiento DateTime? @map("fecha_vencimiento")
+  posicion         Int       @default(0)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  columna      Columna           @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  creadoPor    Usuario?          @relation("TareaCreadaPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  etiquetas    TareaEtiqueta[]
+  asignaciones TareaAsignacion[]
+  checklist    ChecklistItem[]
+
+  @@index([columnaId])
+  @@index([creadoPorId])
+  @@map("tareas")
+}
+
+model Etiqueta {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  tableroId String   @map("tablero_id") @db.VarChar(36)
+  texto     String   @db.VarChar(50)
+  color     String   @db.VarChar(7)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tablero Tablero         @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  tareas  TareaEtiqueta[]
+
+  @@unique([tableroId, texto])
+  @@index([tableroId])
+  @@map("etiquetas")
+}
+
+model TareaEtiqueta {
+  tareaId    String @map("tarea_id") @db.VarChar(36)
+  etiquetaId String @map("etiqueta_id") @db.VarChar(36)
+
+  tarea    Tarea    @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  etiqueta Etiqueta @relation(fields: [etiquetaId], references: [id], onDelete: Cascade)
+
+  @@id([tareaId, etiquetaId])
+  @@unique([tareaId, etiquetaId])
+  @@index([etiquetaId])
+  @@map("tarea_etiquetas")
+}
+
+model TareaAsignacion {
+  tareaId   String   @map("tarea_id") @db.VarChar(36)
+  usuarioId String   @map("usuario_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tarea   Tarea   @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([tareaId, usuarioId])
+  @@unique([tareaId, usuarioId])
+  @@index([usuarioId])
+  @@map("tarea_asignaciones")
+}
+
+model ChecklistItem {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  tareaId   String   @map("tarea_id") @db.VarChar(36)
+  texto     String   @db.VarChar(200)
+  hecho     Boolean  @default(false)
+  posicion  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tarea Tarea @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+
+  @@index([tareaId])
+  @@map("checklist_items")
+}
+
+model FavoritoTablero {
+  tableroId String   @map("tablero_id") @db.VarChar(36)
+  usuarioId String   @map("usuario_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tablero Tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([tableroId, usuarioId])
+  @@unique([tableroId, usuarioId])
+  @@index([usuarioId])
+  @@map("favorito_tableros")
+}
+
+model Conversacion {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  creadoPorId String?  @map("creado_por_id") @db.VarChar(36)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  participantes ConversacionParticipante[]
+  mensajes      Mensaje[]
+
+  @@map("conversaciones")
+}
+
+model ConversacionParticipante {
+  conversacionId String   @map("conversacion_id") @db.VarChar(36)
+  usuarioId      String   @map("usuario_id") @db.VarChar(36)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversacion Conversacion @relation(fields: [conversacionId], references: [id], onDelete: Cascade)
+  usuario      Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([conversacionId, usuarioId])
+  @@unique([conversacionId, usuarioId])
+  @@index([usuarioId])
+  @@map("conversacion_participantes")
+}
+
+model Mensaje {
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  conversacionId String    @map("conversacion_id") @db.VarChar(36)
+  autorId        String    @map("autor_id") @db.VarChar(36)
+  texto          String    @db.Text
+  leidoAt        DateTime? @map("leido_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  conversacion Conversacion @relation(fields: [conversacionId], references: [id], onDelete: Cascade)
+  autor        Usuario      @relation("MensajeAutor", fields: [autorId], references: [id], onDelete: Cascade)
+
+  @@index([conversacionId])
+  @@index([autorId])
+  @@map("mensajes")
+}
