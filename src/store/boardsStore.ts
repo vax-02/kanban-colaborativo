@@ -8,6 +8,7 @@ import type {
   InvitacionDto,
   MemberDto,
   RolTablero,
+  SentInviteDto,
   TaskDto,
   UpdateBoardInput,
   UpdateTaskInput,
@@ -20,6 +21,7 @@ type BoardsStore = {
   membersV: number
   invites: InvitacionDto[]
   loadingInvites: boolean
+  sentInvites: SentInviteDto[]
   loadBoards: () => Promise<void>
   createBoard: (input: CreateBoardInput) => Promise<BoardDto>
   updateBoard: (id: string, input: UpdateBoardInput) => Promise<BoardDto>
@@ -35,7 +37,13 @@ type BoardsStore = {
   removeMember: (boardId: string, usuarioId: string) => Promise<void>
   bumpMembers: () => void
   loadInvitations: () => Promise<void>
-  sendInvite: (boardId: string, usuarioId: string, rol: RolTablero) => Promise<void>
+  loadSentInvites: () => Promise<void>
+  sendInvite: (
+    boardId: string,
+    usuarioId: string,
+    rol: RolTablero,
+    email?: string,
+  ) => Promise<void>
   acceptInvitation: (id: string) => Promise<void>
   rejectInvitation: (id: string) => Promise<void>
   cancelInvite: (boardId: string, usuarioId: string) => Promise<void>
@@ -48,6 +56,7 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
   membersV: 0,
   invites: [],
   loadingInvites: false,
+  sentInvites: [],
 
   async loadBoards() {
     if (!getToken()) {
@@ -177,10 +186,24 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
     }
   },
 
-  async sendInvite(boardId, usuarioId, rol) {
+  async loadSentInvites() {
+    try {
+      const res = await api<{ invites: SentInviteDto[] }>('/invitaciones/enviadas')
+      set({ sentInvites: res.invites })
+    } catch {
+      set({ sentInvites: [] })
+    }
+  },
+
+  async sendInvite(
+    boardId: string,
+    usuarioId: string,
+    rol: RolTablero,
+    email?: string,
+  ) {
     await api<{ invitacion: InvitacionDto }>(`/boards/${boardId}/invitaciones`, {
       method: 'POST',
-      body: JSON.stringify({ usuarioId, rol }),
+      body: JSON.stringify(email ? { email, rol } : { usuarioId, rol }),
     })
     get().bumpMembers()
   },

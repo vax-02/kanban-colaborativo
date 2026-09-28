@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { Check, KanbanSquare, Lock, LockOpen, Palette, Plus, Users } from 'lucide-react'
+import { Check, KanbanSquare, Lock, LockOpen, Palette, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Modal from '../Modal'
-import { team } from '../../data/mock'
 import { useBoardsStore } from '../../store/boardsStore'
 import type { Plantilla, CreateBoardInput } from '../../lib/types'
 
@@ -93,7 +92,9 @@ export default function CreateBoardModal({ onClose }: Props) {
       footer={
         <>
           <span className="text-xs text-ink-500">
-            {privateB ? 'Solo visible para miembros' : 'Visible para el equipo'}
+            {privateB
+              ? 'Solo tú puedes verlo ahora. Tendrás acceso inmediato.'
+              : 'Invita a tu equipo cuando quieras desde las opciones del tablero.'}
           </span>
           <button
             type="button"
@@ -185,8 +186,8 @@ export default function CreateBoardModal({ onClose }: Props) {
             </p>
             <p className="text-xs text-ink-400">
               {privateB
-                ? 'Solo los miembros invitados podrán verlo.'
-                : 'Todo el equipo podrá descubrirlo y unirse.'}
+                ? 'Solo tú puedes verlo: los colaboradores se añaden por invitación.'
+                : 'Cualquier usuario registrado podrá descubrirlo y unirse.'}
             </p>
           </div>
         </div>
@@ -206,40 +207,14 @@ export default function CreateBoardModal({ onClose }: Props) {
         </button>
       </div>
 
-      {/* Equipo */}
-      <p className="mt-5 mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-        Miembros iniciales
-      </p>
-      <div className="flex items-center justify-between rounded-xl border border-ink-200 bg-surface p-3">
-        <div className="flex items-center gap-3">
-          <div className="flex -space-x-2">
-            {team.slice(0, 4).map((p) => (
-              <AvatarMini key={p.id} initials={p.initials} color={p.color} />
-            ))}
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink-200 text-[10px] font-bold text-ink-600 ring-2 ring-surface">
-              +{team.length}
-            </span>
-          </div>
-          <span className="text-sm font-medium text-ink-700">
-            Todo el equipo de TaskFlow
-          </span>
-        </div>
-        <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600">
-          <Users className="h-3.5 w-3.5" />
-          Se unirán al crearlo
-        </span>
+      {/* Aviso de acceso */}
+      <div className="mt-5 flex items-start gap-3 rounded-xl border border-ink-200 bg-ink-50 px-4 py-3">
+        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+        <p className="text-xs leading-relaxed text-ink-500">
+          Al crearlo, <strong>solo tú</strong> serás miembro del tablero. No se invitará a nadie de
+          forma directa: añade colaboradores cuando quieras enviándoles una invitación.
+        </p>
       </div>
     </Modal>
-  )
-}
-
-function AvatarMini({ initials, color }: { initials: string; color: string }) {
-  return (
-    <span
-      className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold text-white ring-2 ring-surface"
-      style={{ backgroundColor: color }}
-    >
-      {initials}
-    </span>
   )
 }

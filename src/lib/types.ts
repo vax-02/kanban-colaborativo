@@ -176,3 +176,13 @@ export type UpdateTaskInput = Partial<
     checklist: ChecklistInput[]
   }
 >
+export type ApiSearchedUser = UserMini
+
+export type SentInviteDto = {
+  id: string
+  rol: RolTablero
+  estado: 'PENDIENTE' | 'ACEPTADA' | 'RECHAZADA'
+  createdAt: string
+  usuario: UserMini
+  tablero: { id: string; nombre: string; color: string }
+}

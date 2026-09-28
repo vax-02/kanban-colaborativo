@@ -12,13 +12,16 @@ import Avatar from '../components/Avatar'
 import { useUiStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { useAuthStore } from '../store/authStore'
+import { useBoardsStore } from '../store/boardsStore'
 
 const roles = ['Miembro', 'Editor', 'Solo lectura', 'Administrador']
 
-const pendingInvites = [
-  { id: 'p1', color: '#0ea5e9', initials: 'S', name: 'Sandra Peña', email: 'sandra@empresa.com', role: 'Editor', time: 'Hace 2 h' },
-  { id: 'p2', color: '#f43f5e', initials: 'D', name: 'Diego Ramírez', email: 'diego@empresa.com', role: 'Miembro', time: 'Hace 1 día' },
-]
+const roleLabel: Record<string, string> = {
+  ADMINISTRADOR: 'Administrador',
+  MIEMBRO: 'Miembro',
+  EDITOR: 'Editor',
+  LECTURA: 'Solo lectura',
+}
 
 export default function MembersPage() {
   const openModal = useUiStore((s) => s.openModal)
@@ -26,13 +29,18 @@ export default function MembersPage() {
   const me = useAuthStore((s) => s.user)
   const contacts = useChatStore((s) => s.contacts)
   const loadContacts = useChatStore((s) => s.loadContacts)
+  const sentInvites = useBoardsStore((s) => s.sentInvites)
+  const loadSentInvites = useBoardsStore((s) => s.loadSentInvites)
+  const membersV = useBoardsStore((s) => s.membersV)
   const [memberRoles, setMemberRoles] = useState<Record<string, string>>({})
 
   useEffect(() => {
     void loadContacts()
-  }, [loadContacts])
+    void loadSentInvites()
+  }, [loadContacts, loadSentInvites, membersV])
 
   const online = contacts.filter((p) => p.online).length
+  const pendingInvites = sentInvites
 
   const stats = [
     { icon: Users, label: 'Miembros totales', value: String(contacts.length), color: '#6366f1', bg: '#eef2ff' },
@@ -96,26 +104,25 @@ export default function MembersPage() {
                 key={p.id}
                 className="flex items-center gap-3 rounded-2xl border border-amber-200/70 bg-amber-50/50 p-3.5"
               >
-                <Avatar initials={p.initials} color={p.color} name={p.name} size="sm" className="opacity-60" />
+                <Avatar
+                  initials={p.usuario.iniciales}
+                  color={p.usuario.avatarColor}
+                  name={`${p.usuario.nombre} ${p.usuario.apellidos}`}
+                  size="sm"
+                  className="opacity-60"
+                />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-ink-800">{p.name}</p>
+                  <p className="truncate text-sm font-semibold text-ink-800">
+                    {p.usuario.nombre} {p.usuario.apellidos}
+                  </p>
                   <p className="truncate text-xs text-ink-400">
-                    {p.email} · invitado hace {p.time.replace('Hace ', '')} como {p.role}
+                    {p.usuario.email} · tablero «{p.tablero.nombre}» ·{' '}
+                    {roleLabel[p.rol]}
                   </p>
                 </div>
                 <span className="rounded-md bg-surface px-2.5 py-1 text-[11px] font-semibold text-amber-600 ring-1 ring-amber-200">
                   Pendiente
                 </span>
-                <button type="button" className="btn-ghost px-3 py-1.5 text-xs">
-                  Reenviar
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-lg p-1.5 text-ink-300 transition hover:bg-ink-100 hover:text-ink-600"
-                  aria-label="Cancelar invitación"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
               </div>
             ))}
           </div>

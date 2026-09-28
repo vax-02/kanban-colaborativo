@@ -1,5 +1,4 @@
 import { useUiStore } from '../store/uiStore'
-import { team } from '../data/mock'
 import CollaboratorModal from './CollaboratorModal'
 import CreateBoardModal from './modals/CreateBoardModal'
 import EditBoardModal from './modals/EditBoardModal'
@@ -15,7 +14,7 @@ export default function ModalGateway() {
 
   switch (modal.type) {
     case 'collaborators':
-      return <CollaboratorModal team={team} onClose={closeModal} />
+      return <CollaboratorModal boardId={modal.boardId} onClose={closeModal} />
 
     case 'createBoard':
       return <CreateBoardModal onClose={closeModal} />

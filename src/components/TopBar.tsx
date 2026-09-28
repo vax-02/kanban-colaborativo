@@ -140,7 +140,7 @@ export default function TopBar() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => openModal({ type: 'collaborators' })}
+                onClick={() => openModal({ type: 'collaborators', boardId: boardId as string | undefined })}
                 className="btn-primary"
               >
                 <UserPlus className="h-4 w-4" />
@@ -293,7 +293,7 @@ function MoreMenu({ onClose }: { onClose: () => void }) {
   const [deleting, setDeleting] = useState(false)
 
   const items = [
-    { icon: UserPlus, label: 'Añadir colaboradores', action: () => openModal({ type: 'collaborators' }) },
+    { icon: UserPlus, label: 'Añadir colaboradores', action: () => openModal({ type: 'collaborators', boardId: boardId as string | undefined }) },
     { icon: SlidersHorizontal, label: 'Filtrar tareas', action: () => openModal({ type: 'filters' }) },
     { icon: Clock, label: 'Historial de actividad', action: () => openModal({ type: 'activity' }) },
   ]

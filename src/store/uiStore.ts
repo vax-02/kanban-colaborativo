@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 export type ModalState =
-  | { type: 'collaborators' }
+  | { type: 'collaborators'; boardId?: string }
   | { type: 'createBoard' }
   | { type: 'editBoard'; boardId: string }
   | { type: 'boardMembers'; boardId: string }

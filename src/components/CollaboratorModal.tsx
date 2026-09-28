@@ -1,202 +1,496 @@
-import { useMemo, useState } from 'react'
-import { Check, ChevronDown, Copy, Mail, Search, Send, UserPlus, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Check,
+  ChevronDown,
+  LoaderCircle,
+  Mail,
+  Search,
+  Send,
+  Trash2,
+  UserPlus,
+  Users,
+} from 'lucide-react'
 import Avatar from './Avatar'
 import Modal from './Modal'
-import type { Person } from '../data/mock'
+import { api } from '../lib/api'
+import { useBoardsStore } from '../store/boardsStore'
+import { useAuthStore } from '../store/authStore'
+import type { BoardDto, MemberDto, RolTablero } from '../lib/types'
 
 type Props = {
-  team: Person[]
+  boardId?: string
   onClose: () => void
 }
 
-const roles = ['Miembro', 'Editor', 'Solo lectura', 'Administrador']
+const roles: { value: RolTablero; label: string }[] = [
+  { value: 'MIEMBRO', label: 'Miembro' },
+  { value: 'EDITOR', label: 'Editor' },
+  { value: 'LECTURA', label: 'Solo lectura' },
+  { value: 'ADMINISTRADOR', label: 'Administrador' },
+]
 
-export default function CollaboratorModal({ team, onClose }: Props) {
+const roleLabel: Record<string, string> = {
+  ADMINISTRADOR: 'Administrador',
+  MIEMBRO: 'Miembro',
+  EDITOR: 'Editor',
+  LECTURA: 'Solo lectura',
+}
+
+type SearchedUser = {
+  id: string
+  nombre: string
+  apellidos: string
+  email: string
+  avatarColor: string
+  avatarUrl: string | null
+  iniciales: string
+  online: boolean
+}
+
+type BoardInviteRow = {
+  id: string
+  rol: RolTablero
+  usuario: MemberDto
+}
+
+function debounce<T extends (...args: never[]) => void>(fn: T, ms: number) {
+  let t: ReturnType<typeof setTimeout>
+  return (...args: Parameters<T>) => {
+    clearTimeout(t)
+    t = setTimeout(() => fn(...args), ms)
+  }
+}
+
+const searchUsers = debounce(
+  async (q: string, cb: (users: SearchedUser[]) => void) => {
+    try {
+      const res = await api<{ users: SearchedUser[] }>(
+        `/users?buscar=${encodeURIComponent(q)}`,
+      )
+      cb(res.users)
+    } catch {
+      cb([])
+    }
+  },
+  300,
+)
+
+export default function CollaboratorModal({ boardId, onClose }: Props) {
+  const me = useAuthStore((s) => s.user)
+  const boards = useBoardsStore((s) => s.boards)
+  const loadBoards = useBoardsStore((s) => s.loadBoards)
+  const membersV = useBoardsStore((s) => s.membersV)
+  const getBoard = useBoardsStore((s) => s.getBoard)
+  const sendInvite = useBoardsStore((s) => s.sendInvite)
+  const cancelInvite = useBoardsStore((s) => s.cancelInvite)
+
+  const [selectedBoardId, setSelectedBoardId] = useState<string>(boardId ?? '')
+  const [board, setBoard] = useState<BoardDto | null>(null)
+  const [pendingInvites, setPendingInvites] = useState<BoardInviteRow[]>([])
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [results, setResults] = useState<SearchedUser[]>([])
   const [email, setEmail] = useState('')
-  const [selected, setSelected] = useState<string[]>(['u1', 'u2', 'u3'])
-  const [sent, setSent] = useState<Record<string, boolean>>({})
-  const [copied, setCopied] = useState(false)
+  const [role, setRole] = useState<RolTablero>('MIEMBRO')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [sentMsg, setSentMsg] = useState<string | null>(null)
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return team
-    return team.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q),
-    )
-  }, [query, team])
+  const myBoards = useMemo(
+    () =>
+      boards.filter(
+        (b) =>
+          b.creadoPor.id === me?.id ||
+          b.miembros.some((m) => m.id === me?.id && m.rol === 'ADMINISTRADOR'),
+      ),
+    [boards, me?.id],
+  )
 
-  const toggle = (id: string) =>
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    )
+  useEffect(() => {
+    void loadBoards()
+  }, [loadBoards])
 
-  const copyLink = () => {
-    navigator.clipboard?.writeText('https://taskflow.app/invite/abc123')
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  useEffect(() => {
+    if (!selectedBoardId) return
+    let active = true
+    getBoard(selectedBoardId)
+      .then((b) => {
+        if (!active) return
+        setBoard({
+          id: b.id,
+          nombre: b.nombre,
+          descripcion: b.descripcion,
+          color: b.color,
+          plantilla: b.plantilla,
+          esPrivado: b.esPrivado,
+          esFavorito: b.esFavorito,
+          tareas: 0,
+          done: 0,
+          updatedAt: b.updatedAt,
+          creadoPor: b.creadoPor,
+          miembros: b.miembros,
+        })
+        setPendingInvites(b.invitaciones)
+      })
+      .catch(() => setBoard(null))
+      .finally(() => {
+        if (active) setLoadedFor(selectedBoardId)
+      })
+    return () => {
+      active = false
+    }
+  }, [selectedBoardId, membersV, getBoard])
+
+  const searching = selectedBoardId !== '' && loadedFor !== selectedBoardId
+
+  const selectBoard = (id: string) => {
+    setSelectedBoardId(id)
+    setBoard(null)
+    setPendingInvites([])
+    setErrorMsg(null)
+    setSentMsg(null)
+  }
+
+  const inviteByEmail = async (emailToInvite: string) => {
+    setBusy('email')
+    setErrorMsg(null)
+    setSentMsg(null)
+    try {
+      await sendInvite(selectedBoardId, '', role, emailToInvite)
+      setSentMsg(`Invitación enviada a ${emailToInvite}`)
+      // actualiza las invitaciones pendientes
+      const inv = await getBoard(selectedBoardId)
+      setPendingInvites(inv.invitaciones)
+      setEmail('')
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'No se pudo invitar')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const inviteById = async (usuarioId: string) => {
+    setBusy(usuarioId)
+    setErrorMsg(null)
+    setSentMsg(null)
+    try {
+      await sendInvite(selectedBoardId, usuarioId, role)
+      setSentMsg('Invitación enviada')
+      const inv = await getBoard(selectedBoardId)
+      setPendingInvites(inv.invitaciones)
+      setResults([])
+      setQuery('')
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'No se pudo invitar')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const cancelInv = async (usuarioId: string) => {
+    setErrorMsg(null)
+    setSentMsg(null)
+    try {
+      await cancelInvite(selectedBoardId, usuarioId)
+      const inv = await getBoard(selectedBoardId)
+      setPendingInvites(inv.invitaciones)
+      setSentMsg('Invitación cancelada')
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'No se pudo cancelar')
+    }
   }
 
   return (
     <Modal
       title="Añadir colaboradores"
-      subtitle="Invita a tu equipo a colaborar en el tablero «App móvil»."
+      subtitle={
+        board
+          ? `Invita a tu equipo a colaborar en el tablero «${board.nombre}».`
+          : 'Selecciona un tablero que administres para invitar personas.'
+      }
       icon={<UserPlus className="h-5 w-5" />}
       onClose={onClose}
-      footer={
-        <>
-          <p className="text-xs text-ink-500">
-            {selected.length} colaborador{selected.length !== 1 && 'es'} seleccionado{selected.length !== 1 && 's'}
-          </p>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="btn-ghost">
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setSent((s) => ({
-                  ...s,
-                  ...Object.fromEntries(selected.map((id) => [id, true])),
-                }))
-              }
-              disabled={selected.length === 0}
-              className="btn-primary"
-            >
-              <Send className="h-4 w-4" />
-              Enviar invitaciones
-            </button>
-          </div>
-        </>
-      }
+      footer={<div />}
     >
-      {/* Búsqueda */}
-      <div className="relative mb-4">
-        <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-400" />
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por nombre o correo…"
-          className="input pl-10"
-          autoFocus
-        />
-      </div>
-
-      {/* Invitar por correo */}
-      <div className="mb-5 rounded-xl border border-ink-200 bg-ink-50 p-3">
-        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-ink-700">
-          <Mail className="h-3.5 w-3.5 text-ink-400" />
-          Invitar por correo electrónico
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && setEmail('')}
-            placeholder="correo@empresa.com"
-            className="input"
-          />
-          <button
-            type="button"
-            onClick={() => email.trim() && setEmail('')}
-            disabled={!email.trim()}
-            className="btn-primary shrink-0"
-          >
-            <Send className="h-4 w-4" />
-            Invitar
-          </button>
+      {!selectedBoardId && myBoards.length > 0 && (
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-bold text-ink-600">
+            Tablero destino
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {myBoards.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => selectBoard(b.id)}
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-surface px-3 py-2 text-xs font-semibold text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
+              >
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: b.color }}
+                />
+                {b.nombre}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Enlace de invitación */}
-      <button
-        type="button"
-        onClick={copyLink}
-        className="mb-5 flex w-full cursor-pointer items-center justify-between rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-3 text-left transition hover:bg-brand-100"
-      >
-        <div>
-          <p className="flex items-center gap-1.5 text-xs font-semibold text-brand-700">
-            <Users className="h-3.5 w-3.5" />
-            Compartir enlace de invitación
-          </p>
-          <p className="mt-0.5 truncate text-xs text-brand-500">
-            taskflow.app/invite/abc123
-          </p>
-        </div>
-        <span className="flex items-center gap-1 text-xs font-bold text-brand-700">
-          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-          {copied ? 'Copiado' : 'Copiar'}
-        </span>
-      </button>
+      {selectedBoardId && (
+        <>
+          {/* Búsqueda de usuarios */}
+          <div className="relative mb-4">
+            <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                const q = e.target.value.trim()
+                if (q.length >= 2) {
+                  searchUsers(q, setResults)
+                } else {
+                  setResults([])
+                }
+              }}
+              placeholder="Buscar usuario por correo o nombre…"
+              className="input pl-10"
+              autoFocus
+            />
+          </div>
 
-      {/* Personas */}
-      <p className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-        Miembros del equipo ({filtered.length})
-      </p>
-      <ul className="space-y-2">
-        {filtered.map((p) => {
-          const isSelected = selected.includes(p.id)
-          const isSent = sent[p.id]
-          return (
-            <li
-              key={p.id}
-              className={`flex items-center gap-3 rounded-xl border p-3 transition ${
-                isSelected ? 'border-brand-200 bg-brand-50/50' : 'border-ink-200 bg-surface'
-              }`}
-            >
-              <Avatar initials={p.initials} color={p.color} name={p.name} online={p.online} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-ink-800">
-                  {p.name}
-                  {p.online && (
-                    <span className="ml-2 text-[10px] font-bold text-emerald-600">
-                      ● En línea
-                    </span>
-                  )}
-                </p>
-                <p className="truncate text-xs text-ink-400">{p.email}</p>
-              </div>
+          {errorMsg && (
+            <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">
+              {errorMsg}
+            </p>
+          )}
+          {sentMsg && (
+            <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-600">
+              {sentMsg}
+            </p>
+          )}
 
-              {isSent ? (
-                <span className="flex items-center gap-1 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600">
-                  <Check className="h-3.5 w-3.5" />
-                  Enviado
-                </span>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={isSelected ? p.role : roles[0]}
-                    disabled={!isSelected}
-                    className="cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-1.5 pr-8 pl-3 text-xs font-medium text-ink-700 outline-none transition focus:border-brand-400 disabled:cursor-not-allowed disabled:bg-ink-50 disabled:text-ink-400"
-                  >
-                    {roles.map((r) => (
-                      <option key={r}>{r}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
-                </div>
-              )}
+          {/* Resultados de búsqueda */}
+          {results.length > 0 && (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+                Usuarios encontrados
+              </p>
+              <ul className="space-y-2">
+                {results.map((u) => {
+                  const isMember = board?.miembros.some((m) => m.id === u.id)
+                  const isPending = pendingInvites.some((i) => i.usuario.id === u.id)
+                  const isSelf = u.id === me?.id
+                  return (
+                    <li
+                      key={u.id}
+                      className="flex items-center gap-3 rounded-xl border border-ink-200 bg-surface p-3"
+                    >
+                      <Avatar
+                        initials={u.iniciales}
+                        color={u.avatarColor}
+                        name={`${u.nombre} ${u.apellidos}`}
+                        online={u.online}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-ink-800">
+                          {u.nombre} {u.apellidos}
+                        </p>
+                        <p className="truncate text-xs text-ink-400">{u.email}</p>
+                      </div>
+                      {isSelf ? (
+                        <span className="shrink-0 text-xs font-semibold text-ink-400">
+                          Tú
+                        </span>
+                      ) : isMember ? (
+                        <span className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600">
+                          <Check className="h-3.5 w-3.5" />
+                          Miembro
+                        </span>
+                      ) : isPending ? (
+                        <span className="shrink-0 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-600">
+                          Pendiente
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void inviteById(u.id)}
+                          disabled={busy === u.id}
+                          className="shrink-0 cursor-pointer rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed"
+                        >
+                          {busy === u.id ? 'Enviando…' : 'Invitar'}
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
 
+          {query.trim().length >= 2 && results.length === 0 && (
+            <p className="mb-4 rounded-xl border border-dashed border-ink-300 bg-ink-50 px-4 py-3 text-center text-xs text-ink-500">
+              No hay usuarios registrados con ese correo o nombre.
+            </p>
+          )}
+
+          {/* Invitar directamente por correo */}
+          <div className="mb-5 rounded-xl border border-ink-200 bg-ink-50 p-3">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-ink-700">
+              <Mail className="h-3.5 w-3.5 text-ink-400" />
+              Invitar por correo electrónico
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const value = email.trim()
+                    if (value) void inviteByEmail(value)
+                  }
+                }}
+                placeholder="correo@empresa.com"
+                className="input"
+              />
               <button
                 type="button"
                 onClick={() => {
-                  toggle(p.id)
-                  setSent((s) => ({ ...s, [p.id]: false }))
+                  const value = email.trim()
+                  if (value) void inviteByEmail(value)
                 }}
-                className={`shrink-0 cursor-pointer rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                  isSelected
-                    ? 'bg-brand-600 text-white hover:bg-brand-700'
-                    : 'bg-ink-100 text-ink-600 hover:bg-ink-200'
-                }`}
+                disabled={!email.trim() || busy === 'email'}
+                className="btn-primary shrink-0"
               >
-                {isSelected ? 'Quitar' : 'Añadir'}
+                {busy === 'email' ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Invitar
               </button>
-            </li>
-          )
-        })}
-      </ul>
+            </div>
+            <div className="mt-3 flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-ink-500">Rol:</span>
+              <div className="relative">
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as RolTablero)}
+                  className="cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-1.5 pr-8 pl-3 text-xs font-medium text-ink-700 outline-none transition focus:border-brand-400"
+                >
+                  {roles.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
+              </div>
+            </div>
+          </div>
+
+          {/* Invitaciones pendientes */}
+          {pendingInvites.length > 0 && (
+            <div className="mb-5">
+              <p className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+                Invitaciones pendientes ({pendingInvites.length})
+              </p>
+              <ul className="space-y-2">
+                {pendingInvites.map((i) => (
+                  <li
+                    key={i.id}
+                    className="flex items-center gap-3 rounded-xl border border-amber-200/70 bg-amber-50/50 p-3"
+                  >
+                    <Avatar
+                      initials={i.usuario.iniciales}
+                      color={i.usuario.avatarColor}
+                      name={`${i.usuario.nombre} ${i.usuario.apellidos}`}
+                      size="sm"
+                      className="opacity-60"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink-800">
+                        {i.usuario.nombre} {i.usuario.apellidos}
+                      </p>
+                      <p className="truncate text-xs text-ink-400">
+                        {i.usuario.email} · {roleLabel[i.rol]}
+                      </p>
+                    </div>
+                    <span className="rounded-md bg-surface px-2.5 py-1 text-[11px] font-semibold text-amber-600 ring-1 ring-amber-200">
+                      Pendiente
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void cancelInv(i.usuario.id)}
+                      className="shrink-0 cursor-pointer rounded-lg p-1.5 text-ink-400 transition hover:bg-amber-100 hover:text-rose-600"
+                      aria-label="Cancelar invitación"
+                      title="Cancelar invitación"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Miembros actuales */}
+          {searching ? (
+            <p className="py-6 text-center text-xs text-ink-400">Cargando…</p>
+          ) : (
+            board && (
+              <div>
+                <p className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+                  Miembros del tablero ({board.miembros.length})
+                </p>
+                <ul className="space-y-2">
+                  {board.miembros.map((m) => (
+                    <li
+                      key={m.id}
+                      className="flex items-center gap-3 rounded-xl border border-ink-200 bg-surface p-3"
+                    >
+                      <Avatar
+                        initials={m.iniciales}
+                        color={m.avatarColor}
+                        name={`${m.nombre} ${m.apellidos}`}
+                        online={m.online}
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-ink-800">
+                          {m.nombre} {m.apellidos}
+                          {m.id === me?.id && (
+                            <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-600">
+                              TÚ
+                            </span>
+                          )}
+                        </p>
+                        <p className="truncate text-xs text-ink-400">{m.email}</p>
+                      </div>
+                      <span className="shrink-0 rounded-md bg-ink-100 px-2.5 py-1 text-[11px] font-semibold text-ink-600">
+                        {roleLabel[m.rol]}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          )}
+        </>
+      )}
+
+      {!selectedBoardId && myBoards.length === 0 && (
+        <div className="flex flex-col items-center rounded-xl border border-dashed border-ink-300 bg-ink-50 py-10 text-center">
+          <Users className="mb-2 h-8 w-8 text-ink-300" />
+          <p className="text-sm font-semibold text-ink-700">
+            No administras ningún tablero
+          </p>
+          <p className="mt-1 text-xs text-ink-400">
+            Crea un tablero primero para poder invitar colaboradores.
+          </p>
+        </div>
+      )}
     </Modal>
   )
 }
