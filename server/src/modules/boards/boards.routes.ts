@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client'
+import { Prisma, type RolTablero } from '@prisma/client'
 import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { basicUser } from '../../lib/serialize'
@@ -10,6 +10,7 @@ import {
 } from '../../lib/tasks'
 import { prisma } from '../../lib/prisma'
 import { requireAuth, type AuthedRequest } from '../../middleware/auth'
+import { crearNotificacion } from '../../lib/notificaciones'
 
 const router = Router()
 router.use(requireAuth)
@@ -45,7 +46,8 @@ const addMemberSchema = z.object({
 })
 const updateMemberSchema = z.object({ rol: memberRolSchema })
 const sendInviteSchema = z.object({
-  usuarioId: z.string().min(1),
+  usuarioId: z.string().min(1).optional(),
+  email: z.string().email().optional(),
   rol: memberRolSchema,
   mensaje: z.string().trim().max(500).optional(),
 })
@@ -440,8 +442,34 @@ router.post('/:id/invitaciones', async (req: Request, res: Response) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
     return
   }
-  const { usuarioId, rol, mensaje } = parsed.data
+  const { usuarioId, email, rol, mensaje } = parsed.data
 
+  const usuarioid = usuarioId ?? null
+  if (!usuarioid && email) {
+    const byEmail = await prisma.usuario.findUnique({
+      where: { email: email.toLowerCase() },
+      select: { id: true, estado: true },
+    })
+    if (!byEmail) {
+      res.status(404).json({ error: 'No existe un usuario registrado con ese correo' })
+      return
+    }
+    const targetUsuarioId = byEmail.id
+    await inviteUser(res, id, userId, targetUsuarioId, rol, mensaje ?? null)
+    return
+  }
+
+  await inviteUser(res, id, userId, usuarioid ?? '', rol, mensaje ?? null)
+})
+
+async function inviteUser(
+  res: Response,
+  id: string,
+  userId: string,
+  usuarioId: string,
+  rol: RolTablero,
+  mensaje: string | null,
+) {
   const target = await prisma.usuario.findUnique({
     where: { id: usuarioId },
     select: { id: true, estado: true },
@@ -473,11 +501,25 @@ router.post('/:id/invitaciones', async (req: Request, res: Response) => {
 
   const invitacion = await prisma.invitacion.upsert({
     where: { tableroId_usuarioId: { tableroId: id, usuarioId } },
-    create: { tableroId: id, usuarioId, creadoPorId: userId, rol, mensaje: mensaje ?? null },
-    update: { estado: 'PENDIENTE', respondidaAt: null, rol, mensaje: mensaje ?? null, creadoPorId: userId },
+    create: { tableroId: id, usuarioId, creadoPorId: userId, rol, mensaje: mensaje },
+    update: { estado: 'PENDIENTE', respondidaAt: null, rol, mensaje, creadoPorId: userId },
   })
+
+  const board = await prisma.tablero.findUnique({
+    where: { id },
+    select: { id: true, nombre: true },
+  })
+  await crearNotificacion({
+    usuarioId,
+    tipo: 'INVITACION',
+    titulo: `Te invitaron a «${board?.nombre ?? 'un tablero'}»`,
+    cuerpo: `Se te invitó para colaborar en el tablero.`,
+    tableroId: id,
+    invitacionId: invitacion.id,
+  })
+
   res.status(201).json({ invitacion })
-})
+}
 
 // DELETE /api/boards/:id/invitaciones/:usuarioId — cancelar invitación pendiente (solo admin)
 router.delete(
