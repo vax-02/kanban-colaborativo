@@ -7,6 +7,9 @@ import TaskModal from './modals/TaskModal'
 import FiltersModal from './modals/FiltersModal'
 import ActivityModal from './modals/ActivityModal'
 import DeleteBoardModal from './modals/DeleteBoardModal'
+import RemoveMemberModal from './modals/RemoveMemberModal'
+import ArchiveBoardModal from './modals/ArchiveBoardModal'
+import LabelsModal from './modals/LabelsModal'
 
 export default function ModalGateway() {
   const { modal, closeModal } = useUiStore()
@@ -42,8 +45,31 @@ export default function ModalGateway() {
     case 'activity':
       return <ActivityModal onClose={closeModal} />
 
+    case 'labels':
+      return <LabelsModal boardId={modal.boardId} onClose={closeModal} />
+
     case 'deleteBoard':
       return <DeleteBoardModal boardId={modal.boardId} onClose={closeModal} />
+
+    case 'archiveBoard':
+      return (
+        <ArchiveBoardModal
+          boardId={modal.boardId}
+          boardNombre={modal.boardNombre}
+          boardColor={modal.boardColor}
+          onClose={closeModal}
+        />
+      )
+
+    case 'removeMember':
+      return (
+        <RemoveMemberModal
+          boardId={modal.boardId}
+          boardNombre={modal.boardNombre}
+          member={modal.member}
+          onClose={closeModal}
+        />
+      )
 
     default:
       return null

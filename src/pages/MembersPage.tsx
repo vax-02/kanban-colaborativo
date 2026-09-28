@@ -11,7 +11,7 @@ import Avatar from '../components/Avatar'
 import { useUiStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useBoardsStore } from '../store/boardsStore'
-import type { BoardDto, RolTablero } from '../lib/types'
+import type { BoardDto, MemberDto, RolTablero } from '../lib/types'
 
 const ROL_OPTS: { value: RolTablero; label: string }[] = [
   { value: 'ADMINISTRADOR', label: 'Administrador' },
@@ -28,7 +28,6 @@ export default function MembersPage() {
   const loadSentInvites = useBoardsStore((s) => s.loadSentInvites)
   const sentInvites = useBoardsStore((s) => s.sentInvites)
   const updateMemberRole = useBoardsStore((s) => s.updateMemberRole)
-  const removeMember = useBoardsStore((s) => s.removeMember)
 
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<string | null>(null)
@@ -94,19 +93,13 @@ export default function MembersPage() {
     }
   }
 
-  const quitMember = async (board: BoardDto, usuarioId: string) => {
-    const m = board.miembros.find((x) => x.id === usuarioId)
-    if (!m) return
-    if (!window.confirm(`¿Quitar a ${m.nombre} ${m.apellidos} de «${board.nombre}»?`)) return
-    setPending(`${board.id}:${usuarioId}`)
-    setError(null)
-    try {
-      await removeMember(board.id, usuarioId)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo quitar al miembro')
-    } finally {
-      setPending(null)
-    }
+  const quitMember = (board: BoardDto, member: MemberDto) => {
+    openModal({
+      type: 'removeMember',
+      boardId: board.id,
+      boardNombre: board.nombre,
+      member,
+    })
   }
 
   return (
@@ -348,7 +341,7 @@ export default function MembersPage() {
 
                             <button
                               type="button"
-                              onClick={() => quitMember(board, m.id)}
+                              onClick={() => quitMember(board, m)}
                               disabled={!canManage || busy || isCreator}
                               className="cursor-pointer rounded-lg p-1.5 text-ink-300 transition hover:bg-rose-50 hover:text-rose-500 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-300"
                               aria-label={`Quitar a ${m.nombre} ${m.apellidos} del tablero`}

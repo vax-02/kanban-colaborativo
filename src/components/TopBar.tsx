@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  Archive,
+  ArchiveRestore,
+  AtSign,
   Bell,
   Check,
   Clock,
   ExternalLink,
   MoreHorizontal,
+  MoveRight,
   Search,
   SlidersHorizontal,
   Star,
@@ -111,8 +115,9 @@ export default function TopBar() {
               <div className="relative w-full max-w-md">
                 <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-400" />
                 <input
+                  id="topbar-search"
                   type="search"
-                  placeholder="Buscar tarea, etiqueta o persona…"
+                  placeholder="Buscar tarea, etiqueta o persona… (/)"
                   className="w-full rounded-xl border border-ink-200 bg-ink-50 py-2.5 pr-24 pl-10 text-sm text-ink-800 transition outline-none placeholder:text-ink-400 focus:border-brand-400 focus:bg-surface focus:ring-4 focus:ring-brand-100"
                 />
                 <kbd className="absolute top-1/2 right-3 -translate-y-1/2 rounded-md border border-ink-200 bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-400">
@@ -229,6 +234,9 @@ export default function TopBar() {
           {openMore && (
             <MoreMenu
               isOwner={!!currentBoard && currentBoard.creadoPor.id === me?.id}
+              archivado={currentBoard?.archivado ?? false}
+              boardNombre={currentBoard?.nombre ?? 'este tablero'}
+              boardColor={currentBoard?.color ?? '#94a3b8'}
               onClose={() => setOpenMore(false)}
             />
           )}
@@ -244,6 +252,14 @@ function iconoNotificacion(tipo: string) {
       return { Icon: UserPlus, color: '#0ea5e9' }
     case 'INVITACION_ACEPTADA':
       return { Icon: Check, color: '#10b981' }
+    case 'TAREA_ASIGNADA':
+      return { Icon: UserPlus, color: '#f59e0b' }
+    case 'TAREA_MOVIDA':
+      return { Icon: MoveRight, color: '#0ea5e9' }
+    case 'TAREA_MENCION':
+      return { Icon: AtSign, color: '#8b5cf6' }
+    case 'TAREA_POR_VENCER':
+      return { Icon: Clock, color: '#ef4444' }
     default:
       return { Icon: Users, color: '#94a3b8' }
   }
@@ -345,8 +361,21 @@ function NotificationsPopover({ onClose }: { onClose: () => void }) {
   )
 }
 
-function MoreMenu({ onClose, isOwner }: { onClose: () => void; isOwner: boolean }) {
+function MoreMenu({
+  onClose,
+  isOwner,
+  archivado,
+  boardNombre,
+  boardColor,
+}: {
+  onClose: () => void
+  isOwner: boolean
+  archivado: boolean
+  boardNombre: string
+  boardColor: string
+}) {
   const openModal = useUiStore((s) => s.openModal)
+  const setArchivado = useBoardsStore((s) => s.setArchivado)
   const { boardId } = useParams()
 
   const items = [
@@ -372,6 +401,32 @@ function MoreMenu({ onClose, isOwner }: { onClose: () => void; isOwner: boolean 
         </button>
       ))}
       <div className="my-1.5 h-px bg-ink-100" />
+      {isOwner && boardId && (
+        <button
+          type="button"
+          onClick={() => {
+            if (archivado) {
+              void setArchivado(boardId, false)
+            } else {
+              openModal({
+                type: 'archiveBoard',
+                boardId,
+                boardNombre,
+                boardColor,
+              })
+            }
+            onClose()
+          }}
+          className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink-700 transition hover:bg-ink-50"
+        >
+          {archivado ? (
+            <ArchiveRestore className="h-4 w-4 text-ink-400" />
+          ) : (
+            <Archive className="h-4 w-4 text-ink-400" />
+          )}
+          {archivado ? 'Restaurar tablero' : 'Archivar tablero…'}
+        </button>
+      )}
       {isOwner && boardId && (
         <button
           type="button"

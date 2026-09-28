@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { MemberDto } from '../lib/types'
 
 export type ModalState =
   | { type: 'collaborators'; boardId?: string }
@@ -8,7 +9,10 @@ export type ModalState =
   | { type: 'task'; taskId: string; columnId: string; boardId: string }
   | { type: 'filters' }
   | { type: 'activity' }
+  | { type: 'labels'; boardId: string }
   | { type: 'deleteBoard'; boardId: string }
+  | { type: 'archiveBoard'; boardId: string; boardNombre: string; boardColor: string }
+  | { type: 'removeMember'; boardId: string; boardNombre: string; member: MemberDto }
   | null
 
 type UiStore = {

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   KanbanSquare,
   LoaderCircle,
@@ -20,7 +22,7 @@ import { useAuthStore } from '../store/authStore'
 import { formatUpdated, isRecent, shortName } from '../lib/format'
 import type { BoardDto } from '../lib/types'
 
-type Tab = 'todos' | 'favoritos' | 'recientes'
+type Tab = 'todos' | 'favoritos' | 'recientes' | 'archivados'
 
 export default function Boards() {
   const openModal = useUiStore((s) => s.openModal)
@@ -29,6 +31,7 @@ export default function Boards() {
     loading,
     loadBoards,
     toggleFavorite,
+    setArchivado,
     invites,
     loadInvitations,
     acceptInvitation,
@@ -46,15 +49,20 @@ export default function Boards() {
     void loadInvitations()
   }, [loadInvitations])
 
+  const archivedCount = boards.filter((b) => b.archivado).length
   const list = boards.filter((b) => {
     const matchQuery =
       !query ||
       b.nombre.toLowerCase().includes(query.toLowerCase()) ||
       (b.descripcion ?? '').toLowerCase().includes(query.toLowerCase())
+    const isArchived = b.archivado
     const matchTab =
-      tab === 'todos' ||
-      (tab === 'favoritos' && b.esFavorito) ||
-      (tab === 'recientes' && (b.esFavorito || isRecent(b.updatedAt)))
+      (tab === 'archivados' && isArchived) ||
+      (tab !== 'archivados' &&
+        !isArchived &&
+        (tab === 'todos' ||
+          (tab === 'favoritos' && b.esFavorito) ||
+          (tab === 'recientes' && (b.esFavorito || isRecent(b.updatedAt)))))
     return matchQuery && matchTab
   })
 
@@ -68,6 +76,21 @@ export default function Boards() {
     e.preventDefault()
     e.stopPropagation()
     void toggleFavorite(b.id)
+  }
+
+  const onToggleArchive = (e: React.MouseEvent, b: BoardDto) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (b.archivado) {
+      void setArchivado(b.id, false)
+      return
+    }
+    openModal({
+      type: 'archiveBoard',
+      boardId: b.id,
+      boardNombre: b.nombre,
+      boardColor: b.color,
+    })
   }
 
   return (
@@ -162,6 +185,7 @@ export default function Boards() {
             ['todos', 'Todos'],
             ['favoritos', 'Favoritos'],
             ['recientes', 'Recientes'],
+            ['archivados', `Archivados (${archivedCount})`],
           ] as [Tab, string][]
         ).map(([key, label]) => (
           <button
@@ -209,10 +233,24 @@ export default function Boards() {
         </div>
       ) : list.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-ink-300 bg-surface py-16 text-center">
-          <p className="font-semibold text-ink-800">Sin resultados</p>
-          <p className="mt-1 text-sm text-ink-400">
-            Ningún tablero coincide con la búsqueda o el filtro.
-          </p>
+          {tab === 'archivados' ? (
+            <>
+              <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-ink-100 text-ink-400">
+                <Archive className="h-7 w-7" />
+              </span>
+              <p className="font-semibold text-ink-800">No hay tableros archivados</p>
+              <p className="mt-1 text-sm text-ink-400">
+                Cuando archives un tablero aparecerá aquí para que puedas restaurarlo.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-ink-800">Sin resultados</p>
+              <p className="mt-1 text-sm text-ink-400">
+                Ningún tablero coincide con la búsqueda o el filtro.
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -232,6 +270,12 @@ export default function Boards() {
                     {shortName(b.nombre)}
                   </span>
                   <div className="flex items-center gap-1">
+                    {b.archivado && (
+                      <span className="flex h-6 items-center justify-center gap-1 rounded-md bg-white/80 px-1.5 text-[10px] font-bold text-ink-600">
+                        <Archive className="h-3 w-3" />
+                        Archivado
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => onToggleFavorite(e, b)}
@@ -287,6 +331,21 @@ export default function Boards() {
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
+                  {b.creadoPor.id === me?.id && (
+                    <button
+                      type="button"
+                      onClick={(e) => onToggleArchive(e, b)}
+                      className="cursor-pointer rounded-md p-1.5 text-ink-400 opacity-0 transition hover:bg-ink-100 hover:text-brand-600 group-hover:opacity-100"
+                      aria-label={b.archivado ? 'Restaurar tablero' : 'Archivar tablero'}
+                      title={b.archivado ? 'Restaurar tablero' : 'Archivar tablero'}
+                    >
+                      {b.archivado ? (
+                        <ArchiveRestore className="h-3.5 w-3.5" />
+                      ) : (
+                        <Archive className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
                   {b.creadoPor.id === me?.id && (
                     <button
                       type="button"
