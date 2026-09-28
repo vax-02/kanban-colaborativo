@@ -32,7 +32,12 @@ export type UserMini = {
   online: boolean
 }
 
-export type MemberDto = UserMini & { rol: RolTablero }
+export type MemberDto = UserMini & {
+  rol: RolTablero
+  ultimoVistoAt: string | null
+  ingresoAt?: string | null
+  invitadoAt?: string | null
+}
 
 export type BoardDto = {
   id: string
@@ -92,6 +97,36 @@ export type BoardDetailDto = {
   etiquetas: EtiquetaDto[]
   invitaciones: BoardInviteDto[]
   columnas: ColumnaDto[]
+  historialMiembros: HistorialMiembroDto[]
+}
+
+export type HistorialMiembroDto = {
+  usuario: UserMini & { ultimoVistoAt?: string | null }
+  rol: RolTablero
+  ingresoAt: string
+  salidaAt: string
+}
+
+export type TipoActividad =
+  | 'TABLERO_CREADO'
+  | 'TAREA_CREADA'
+  | 'TAREA_MOVIDA'
+  | 'TAREA_ELIMINADA'
+  | 'PRIORIDAD_CAMBIADA'
+  | 'MIEMBRO_INVITADO'
+  | 'MIEMBRO_UNIDO'
+  | 'MIEMBRO_REMOVIDO'
+
+export type ActividadDto = {
+  id: string
+  tipo: TipoActividad
+  detalle: string | null
+  de: string | null
+  a: string | null
+  tareaId: string | null
+  createdAt: string
+  autor: UserMini | null
+  usuario: (UserMini & { ultimoVistoAt?: string | null }) | null
 }
 
 export type BoardInviteDto = {
@@ -117,11 +152,28 @@ export type InvitacionDto = {
   creadoPor: UserMini
 }
 
+export type NotificacionDto = {
+  id: string
+  tipo: string
+  titulo: string
+  cuerpo: string | null
+  leida: boolean
+  createdAt: string
+  tablero: { id: string; nombre: string; color: string } | null
+  invitacion: {
+    id: string
+    rol: RolTablero
+    estado: string
+    creadoPor: UserMini
+    tablero: { id: string; nombre: string; color: string } | null
+  } | null
+}
+
 export type CreateBoardInput = {
   nombre: string
   descripcion?: string | null
   color: string
-  plantilla: Plantilla
+  plantilla?: Plantilla
   esPrivado: boolean
 }
 
@@ -173,6 +225,7 @@ export type UpdateTaskInput = Partial<
   Omit<CreateTaskInput, 'columnaId' | 'checklist'> & {
     columnaId?: string
     posicion?: number
+    orden?: string[]
     checklist: ChecklistInput[]
   }
 >
