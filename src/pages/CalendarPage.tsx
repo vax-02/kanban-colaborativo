@@ -1,14 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  CalendarDays,
-  ChevronLeft,
-  ChevronRight,
-  Flag,
-  LoaderCircle,
-} from 'lucide-react'
+import { ChevronLeft, ChevronRight, Flag, LoaderCircle } from 'lucide-react'
 import { getToken } from '../lib/api'
 import { useBoardsStore } from '../store/boardsStore'
 import type { Prioridad } from '../lib/types'
+import DayActivitiesModal, { type DayTask } from '../components/modals/DayActivitiesModal'
 
 const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 
@@ -23,10 +18,20 @@ const PRIORITY_ORDER: Prioridad[] = ['ALTA', 'MEDIA', 'BAJA']
 type CalTask = {
   id: string
   title: string
+  boardId: string
   boardName: string
-  boardColor: string
   prioridad: Prioridad
   date: Date
+}
+
+function sortByPriority(
+  a: { prioridad: Prioridad; title: string },
+  b: { prioridad: Prioridad; title: string },
+) {
+  return (
+    PRIORITY_ORDER.indexOf(a.prioridad) - PRIORITY_ORDER.indexOf(b.prioridad) ||
+    a.title.localeCompare(b.title)
+  )
 }
 
 function toDateKey(d: Date) {
@@ -37,6 +42,7 @@ export default function CalendarPage() {
   const [monthOffset, setMonthOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState<CalTask[]>([])
+  const [dayModal, setDayModal] = useState<{ date: Date; items: DayTask[] } | null>(null)
   const loadBoards = useBoardsStore((s) => s.loadBoards)
   const getBoard = useBoardsStore((s) => s.getBoard)
 
@@ -70,8 +76,8 @@ export default function CalendarPage() {
               collected.push({
                 id: t.id,
                 title: t.titulo,
+                boardId: b.id,
                 boardName: b.nombre,
-                boardColor: b.color,
                 prioridad: t.prioridad,
                 date,
               })
@@ -118,19 +124,74 @@ export default function CalendarPage() {
       map.set(t.date.getDate(), arr)
     }
     for (const arr of map.values()) {
-      arr.sort(
-        (a, b) =>
-          PRIORITY_ORDER.indexOf(a.prioridad) - PRIORITY_ORDER.indexOf(b.prioridad) ||
-          a.title.localeCompare(b.title),
-      )
+      arr.sort(sortByPriority)
     }
     return map
   }, [tasks, year, month])
 
+  const dayTasks = (day: number): DayTask[] =>
+    (tasksByDay.get(day) ?? []).map((t) => ({
+      id: t.id,
+      title: t.title,
+      boardName: t.boardName,
+      prioridad: t.prioridad,
+    }))
+
+  const openDayModal = (day: number) => {
+    const items = dayTasks(day)
+    if (items.length === 0) return
+    setDayModal({ date: new Date(year, month, day), items })
+  }
+
+  const markTaskDone = async (task: DayTask) => {
+    const found = tasks.find((t) => t.id === task.id)
+    if (!found) throw new Error('Tarea no encontrada')
+
+    const board = await getBoard(found.boardId)
+    const doneCol = board.columnas.find(
+      (c) => c.titulo.toUpperCase() === 'TERMINADO',
+    )
+    await useBoardsStore.getState().updateTask(task.id, {
+      columnaId: doneCol?.id,
+      fechaVencimiento: null,
+    })
+
+    setTasks((prev) => prev.filter((t) => t.id !== task.id))
+    setDayModal((m) => {
+      if (!m) return m
+      const remaining = m.items.filter((x) => x.id !== task.id)
+      return remaining.length > 0 ? { ...m, items: remaining } : null
+    })
+  }
+
+  const postponeTask = async (task: DayTask, newDate: Date) => {
+    const found = tasks.find((t) => t.id === task.id)
+    if (!found) throw new Error('Tarea no encontrada')
+
+    const iso = new Date(
+      newDate.getFullYear(),
+      newDate.getMonth(),
+      newDate.getDate(),
+      0,
+      0,
+      0,
+    ).toISOString()
+    await useBoardsStore.getState().updateTask(task.id, { fechaVencimiento: iso })
+
+    setTasks((prev) => [
+      ...prev.filter((t) => t.id !== task.id),
+      { ...found, date: new Date(newDate) },
+    ])
+    setDayModal((m) => {
+      if (!m) return m
+      const remaining = m.items.filter((x) => x.id !== task.id)
+      return remaining.length > 0 ? { ...m, items: remaining } : null
+    })
+  }
+
   const todayKey = toDateKey(today)
 
-  const isToday = (day: number) =>
-    `${year}-${month + 1}-${day}` === todayKey
+  const isToday = (day: number) => `${year}-${month + 1}-${day}` === todayKey
 
   const dueToday = useMemo(
     () =>
@@ -138,25 +199,12 @@ export default function CalendarPage() {
         .filter((t) => toDateKey(t.date) === todayKey && t.date >= today)
         .sort(
           (a, b) =>
-            PRIORITY_ORDER.indexOf(a.prioridad) - PRIORITY_ORDER.indexOf(b.prioridad),
+            PRIORITY_ORDER.indexOf(a.prioridad) -
+              PRIORITY_ORDER.indexOf(b.prioridad) ||
+            a.title.localeCompare(b.title),
         ),
     [tasks, todayKey, today],
   )
-
-  const soon = useMemo(
-    () =>
-      tasks
-        .filter((t) => t.date >= today)
-        .sort(
-          (a, b) =>
-            a.date.getTime() - b.date.getTime() ||
-            PRIORITY_ORDER.indexOf(a.prioridad) - PRIORITY_ORDER.indexOf(b.prioridad),
-        )
-        .slice(0, 4),
-    [tasks, today],
-  )
-
-  const tasksForDay = (day: number) => tasksByDay.get(day) ?? []
 
   return (
     <div className="flex h-full gap-4">
@@ -229,20 +277,17 @@ export default function CalendarPage() {
         <div className="grid flex-1 grid-cols-7 auto-rows-fr overflow-y-auto">
           {cells.map((day, i) => {
             if (day === null) return <div key={i} className="border-ink-100 bg-ink-50/40" />
-            const dayTasks = tasksForDay(day)
-            const isLastRow = i >= cells.length - 7
-            const dateLabel = new Date(year, month, day).toLocaleDateString('es-ES', {
-              weekday: 'long',
-              day: 'numeric',
-              month: 'long',
-            })
+            const items = dayTasks(day)
             return (
               <div
                 key={i}
-                className={`group relative min-h-24 border-ink-100 p-1.5 transition ${
+                onClick={() => openDayModal(day)}
+                className={`group relative min-h-24 overflow-hidden border-ink-100 p-1.5 transition ${
                   i > 0 && i % 7 !== 0 ? 'border-l' : ''
-                } ${i >= 7 ? 'border-t' : ''} hover:z-10 hover:bg-brand-50/50 ${
-                  dayTasks.length > 0 ? 'cursor-pointer' : ''
+                } ${i >= 7 ? 'border-t' : ''} ${
+                  items.length > 0
+                    ? 'cursor-pointer hover:z-10 hover:bg-brand-50/50'
+                    : ''
                 }`}
               >
                 <span
@@ -255,7 +300,7 @@ export default function CalendarPage() {
                   {day}
                 </span>
                 <div className="space-y-1">
-                  {dayTasks.slice(0, 3).map((t) => (
+                  {items.slice(0, 3).map((t) => (
                     <div
                       key={t.id}
                       className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] font-semibold text-white transition hover:brightness-110"
@@ -266,40 +311,12 @@ export default function CalendarPage() {
                       <span className="truncate">{t.title}</span>
                     </div>
                   ))}
-                  {dayTasks.length > 3 && (
+                  {items.length > 3 && (
                     <p className="px-1 text-[10px] font-semibold text-ink-500">
-                      +{dayTasks.length - 3} más
+                      +{items.length - 3} más
                     </p>
                   )}
                 </div>
-
-                {dayTasks.length > 0 && (
-                  <div
-                    className={`pointer-events-none absolute right-1.5 left-1.5 z-20 rounded-xl border border-ink-200 bg-surface p-2.5 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 ${
-                      isLastRow ? 'bottom-8' : 'top-8'
-                    }`}
-                  >
-                    <p className="mb-2 text-[11px] font-bold text-ink-900 capitalize">
-                      {dateLabel}
-                    </p>
-                    <div className="max-h-36 space-y-1.5 overflow-y-auto">
-                      {dayTasks.map((t) => (
-                        <div key={t.id} className="flex items-center gap-1.5">
-                          <span
-                            className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: PRIORITY_COLOR[t.prioridad] }}
-                          />
-                          <div className="min-w-0">
-                            <p className="truncate text-[11px] font-semibold text-ink-800">
-                              {t.title}
-                            </p>
-                            <p className="truncate text-[10px] text-ink-400">{t.boardName}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )
           })}
@@ -317,48 +334,27 @@ export default function CalendarPage() {
       {/* Panel lateral */}
       <aside className="hidden w-72 shrink-0 flex-col gap-4 xl:flex">
         <section className="rounded-2xl border border-ink-200 bg-surface p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-bold text-ink-900">Próximos vencimientos</h3>
-          {soon.length === 0 ? (
-            <p className="text-xs text-ink-400">Sin tareas con fecha vencimiento.</p>
-          ) : (
-            <ul className="space-y-3">
-              {soon.map((t) => (
-                <li key={t.id} className="flex items-start gap-3">
-                  <span
-                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white"
-                    style={{ backgroundColor: PRIORITY_COLOR[t.prioridad] }}
-                  >
-                    <Flag className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-ink-800">
-                      {t.title}
-                    </p>
-                    <p className="text-xs text-ink-400">
-                      {t.boardName} · {t.date.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <button
-            type="button"
-            className="mt-4 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-dashed border-ink-300 py-2 text-xs font-semibold text-ink-400 transition hover:border-brand-300 hover:text-brand-600"
-          >
-            <CalendarDays className="h-3.5 w-3.5" />
-            Añadir evento
-          </button>
-        </section>
-
-        <section className="rounded-2xl border border-ink-200 bg-surface p-4 shadow-sm">
           <h3 className="mb-3 text-sm font-bold text-ink-900">Vencen hoy</h3>
           {dueToday.length === 0 ? (
             <p className="text-xs text-ink-400">Nada vence hoy.</p>
           ) : (
             <ul className="space-y-2.5">
               {dueToday.map((t) => (
-                <li key={t.id} className="flex items-center gap-2.5">
+                <li
+                  key={t.id}
+                  className="flex cursor-pointer items-center gap-2.5"
+                  onClick={() =>
+                    setDayModal({
+                      date: today,
+                      items: dueToday.map((x) => ({
+                        id: x.id,
+                        title: x.title,
+                        boardName: x.boardName,
+                        prioridad: x.prioridad,
+                      })),
+                    })
+                  }
+                >
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
                     style={{ backgroundColor: PRIORITY_COLOR[t.prioridad] }}
@@ -369,20 +365,17 @@ export default function CalendarPage() {
             </ul>
           )}
         </section>
-
-        <div className="rounded-2xl bg-gradient-to-br from-brand-600 to-violet-600 p-4 text-white shadow-md">
-          <p className="text-sm font-bold">Integración con Calendar</p>
-          <p className="mt-1 text-xs text-brand-100">
-            Sincroniza tus tareas con Google Calendar o Outlook.
-          </p>
-          <button
-            type="button"
-            className="mt-3 cursor-pointer rounded-lg bg-white/15 px-3 py-1.5 text-xs font-semibold backdrop-blur transition hover:bg-white/25"
-          >
-            Conectar calendario
-          </button>
-        </div>
       </aside>
+
+      {dayModal && (
+        <DayActivitiesModal
+          date={dayModal.date}
+          items={dayModal.items}
+          onMarkDone={markTaskDone}
+          onPostpone={postponeTask}
+          onClose={() => setDayModal(null)}
+        />
+      )}
     </div>
   )
 }
