@@ -4,7 +4,6 @@ import {
   Check,
   Clock,
   ExternalLink,
-  MessageSquare,
   MoreHorizontal,
   Search,
   SlidersHorizontal,
@@ -13,12 +12,14 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
-import { notices } from '../data/mock'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useUiStore } from '../store/uiStore'
 import { useBoardsStore } from '../store/boardsStore'
 import { useAuthStore } from '../store/authStore'
-import type { BoardDetailDto } from '../lib/types'
+import { useNotificationsStore } from '../store/notificationsStore'
+import { useFiltersStore } from '../store/filtersStore'
+import { countActiveFilters } from '../lib/filters'
+import type { BoardDetailDto, NotificacionDto } from '../lib/types'
 
 export default function TopBar() {
   const openModal = useUiStore((s) => s.openModal)
@@ -30,10 +31,15 @@ export default function TopBar() {
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const [openBell, setOpenBell] = useState(false)
   const [openMore, setOpenMore] = useState(false)
-  const [readIds, setReadIds] = useState<Record<string, boolean>>({})
   const bellRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
   const me = useAuthStore((s) => s.user)
+  const unread = useNotificationsStore(
+    (s) => s.notificaciones.filter((n) => !n.leida).length,
+  )
+  const filterState = useFiltersStore((s) => s.filters)
+  const activeFilters =
+    boardId && filterState.boardId === boardId ? countActiveFilters(filterState) : 0
 
   useEffect(() => {
     if (!boardId) return
@@ -65,8 +71,6 @@ export default function TopBar() {
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
-
-  const unread = notices.filter((n) => !n.read && !readIds[n.id]).length
 
   const currentBoard = board?.id === boardId ? board : null
   const loading = boardId !== undefined && loadedFor !== boardId
@@ -160,11 +164,20 @@ export default function TopBar() {
               <button
                 type="button"
                 onClick={() => openModal({ type: 'filters' })}
-                className="btn-ghost hidden p-2.5 md:inline-flex"
+                className="btn-ghost relative hidden p-2.5 md:inline-flex"
                 aria-label="Filtros"
-                title="Filtros y vistas"
+                title={
+                  activeFilters > 0
+                    ? `${activeFilters} filtro${activeFilters === 1 ? '' : 's'} activo${activeFilters === 1 ? '' : 's'}`
+                    : 'Filtros y vistas'
+                }
               >
                 <SlidersHorizontal className="h-4 w-4" />
+                {activeFilters > 0 && (
+                  <span className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white ring-2 ring-surface">
+                    {activeFilters}
+                  </span>
+                )}
               </button>
             </div>
           </>
@@ -195,7 +208,7 @@ export default function TopBar() {
             )}
           </button>
 
-          {openBell && <NotificationsPopover readIds={readIds} onRead={setReadIds} />}
+          {openBell && <NotificationsPopover onClose={() => setOpenBell(false)} />}
         </div>
 
         {/* Más opciones */}
@@ -225,57 +238,95 @@ export default function TopBar() {
   )
 }
 
-function NotificationsPopover({
-  readIds,
-  onRead,
-}: {
-  readIds: Record<string, boolean>
-  onRead: (v: Record<string, boolean>) => void
-}) {
-  const list = notices.slice(0, 5)
-  const unreadCount = list.filter((n) => !n.read && !readIds[n.id]).length
+function iconoNotificacion(tipo: string) {
+  switch (tipo) {
+    case 'INVITACION':
+      return { Icon: UserPlus, color: '#0ea5e9' }
+    case 'INVITACION_ACEPTADA':
+      return { Icon: Check, color: '#10b981' }
+    default:
+      return { Icon: Users, color: '#94a3b8' }
+  }
+}
+
+function tiempoRelativo(iso: string) {
+  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (min < 1) return 'Ahora mismo'
+  if (min < 60) return `Hace ${min} min`
+  const hrs = Math.floor(min / 60)
+  if (hrs < 24) return `Hace ${hrs} h`
+  const dias = Math.floor(hrs / 24)
+  return `Hace ${dias} día${dias === 1 ? '' : 's'}`
+}
+
+function NotificationsPopover({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate()
+  const notificaciones = useNotificationsStore((s) => s.notificaciones)
+  const markRead = useNotificationsStore((s) => s.markRead)
+  const markAllRead = useNotificationsStore((s) => s.markAllRead)
+
+  const list = notificaciones.slice(0, 5)
+  const unreadCount = notificaciones.filter((n) => !n.leida).length
 
   return (
     <div className="absolute top-[calc(100%+10px)] right-0 z-40 w-[380px] overflow-hidden rounded-2xl border border-ink-200 bg-surface shadow-xl">
       <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
         <div>
           <p className="text-sm font-bold text-ink-900">Notificaciones</p>
-          <p className="text-xs text-ink-400">{unreadCount} sin leer</p>
+          <p className="text-xs text-ink-400">
+            {unreadCount > 0 ? `${unreadCount} sin leer` : 'Todo leído'}
+          </p>
         </div>
         <button
           type="button"
-          onClick={() => onRead(Object.fromEntries(list.map((n) => [n.id, true])))}
-          className="cursor-pointer text-xs font-semibold text-brand-600 hover:text-brand-700"
+          onClick={() => void markAllRead()}
+          disabled={unreadCount === 0}
+          className="cursor-pointer text-xs font-semibold text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:text-ink-300"
         >
           Marcar todas
         </button>
       </div>
 
       <ul className="max-h-[340px] overflow-y-auto">
-        {list.map((n) => {
-          const isRead = n.read || readIds[n.id]
+        {list.length === 0 && (
+          <li className="px-4 py-8 text-center text-sm text-ink-400">
+            Aún no tienes notificaciones.
+          </li>
+        )}
+        {list.map((n: NotificacionDto) => {
+          const isRead = n.leida
+          const meta = iconoNotificacion(n.tipo)
+          const actor = n.invitacion?.creadoPor
           return (
             <li
               key={n.id}
               className={`flex cursor-pointer gap-3 border-b border-ink-50 px-4 py-3 transition hover:bg-ink-50 ${
                 isRead ? 'opacity-70' : ''
               }`}
-              onClick={() => onRead({ ...readIds, [n.id]: true })}
+              onClick={() => {
+                void markRead(n.id)
+                onClose()
+                navigate('/notificaciones')
+              }}
             >
               <span
                 className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                style={{ backgroundColor: `${n.color}18`, color: n.color }}
+                style={{ backgroundColor: `${meta.color}18`, color: meta.color }}
               >
-                {n.type === 'mention' ? <UserPlus className="h-4 w-4" /> : null}
-                {n.type === 'comment' ? <MessageSquare className="h-4 w-4" /> : null}
-                {n.type === 'system' ? <Clock className="h-4 w-4" /> : null}
-                {n.type === 'assign' ? <Check className="h-4 w-4" /> : null}
-                {n.type === 'invite' ? <Users className="h-4 w-4" /> : null}
+                <meta.Icon className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-xs leading-snug font-semibold text-ink-800">{n.title}</p>
-                <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{n.body}</p>
-                <p className="mt-1 text-[11px] text-ink-400">{n.time}</p>
+                <p className="text-xs leading-snug font-semibold text-ink-800">
+                  {actor ? `${actor.nombre} ${actor.apellidos}` : null}
+                  {actor ? ' · ' : ''}
+                  {n.titulo}
+                </p>
+                {n.cuerpo && (
+                  <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{n.cuerpo}</p>
+                )}
+                <p className="mt-1 text-[11px] text-ink-400">
+                  {tiempoRelativo(n.createdAt)}
+                </p>
               </div>
               {!isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-600" />}
             </li>
@@ -285,6 +336,7 @@ function NotificationsPopover({
 
       <Link
         to="/notificaciones"
+        onClick={onClose}
         className="block border-t border-ink-100 bg-ink-50 py-2.5 text-center text-xs font-semibold text-brand-600 transition hover:bg-ink-100"
       >
         Ver todas las notificaciones
@@ -336,7 +388,7 @@ function MoreMenu({ onClose, isOwner }: { onClose: () => void; isOwner: boolean 
       <button
         type="button"
         onClick={() => {
-          if (boardId) window.open(`/tableros/${boardId}`, '_blank')
+          if (boardId) window.open(`/tableros/${boardId}/amplia`, '_blank')
           onClose()
         }}
         className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink-700 transition hover:bg-ink-50 disabled:cursor-not-allowed"

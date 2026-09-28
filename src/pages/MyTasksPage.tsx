@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom'
 import { getToken } from '../lib/api'
 import { useBoardsStore } from '../store/boardsStore'
 import { useAuthStore } from '../store/authStore'
+import { useUiStore } from '../store/uiStore'
 import type { Prioridad, TaskDto } from '../lib/types'
 
 type Tab = 'todas' | 'pendientes' | 'completadas'
@@ -32,6 +33,7 @@ type MyRow = {
   boardId: string
   boardName: string
   boardColor: string
+  columnId: string
   column: string
   done: boolean
 }
@@ -61,6 +63,8 @@ export default function MyTasksPage() {
   const me = useAuthStore((s) => s.user)
   const loadBoards = useBoardsStore((s) => s.loadBoards)
   const getBoard = useBoardsStore((s) => s.getBoard)
+  const taskV = useBoardsStore((s) => s.taskV)
+  const openModal = useUiStore((s) => s.openModal)
 
   useEffect(() => {
     let active = true
@@ -89,6 +93,7 @@ export default function MyTasksPage() {
                 boardId: b.id,
                 boardName: b.nombre,
                 boardColor: b.color,
+                columnId: col.id,
                 column: col.titulo,
                 done: col.titulo.toUpperCase() === 'TERMINADO',
               })
@@ -106,7 +111,7 @@ export default function MyTasksPage() {
     return () => {
       active = false
     }
-  }, [me, loadBoards, getBoard])
+  }, [me, loadBoards, getBoard, taskV])
 
   const list = useMemo(() => {
     return rows.filter((r) => {
@@ -128,6 +133,9 @@ export default function MyTasksPage() {
   }, [list])
 
   const pendingCount = rows.filter((r) => !r.done).length
+
+  const openDetail = (r: MyRow) =>
+    openModal({ type: 'task', taskId: r.task.id, columnId: r.columnId, boardId: r.boardId })
 
   return (
     <div className="mx-auto h-full max-w-4xl overflow-y-auto pb-4">
@@ -224,9 +232,14 @@ export default function MyTasksPage() {
                         {r.done && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
                       </span>
 
-                      <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => openDetail(r)}
+                        className="min-w-0 flex-1 cursor-pointer text-left"
+                        aria-label={`Abrir detalle de ${r.task.titulo}`}
+                      >
                         <p
-                          className={`truncate text-sm font-medium ${
+                          className={`truncate text-sm font-medium hover:underline ${
                             r.done ? 'text-ink-400 line-through' : 'text-ink-800'
                           }`}
                         >
@@ -259,7 +272,7 @@ export default function MyTasksPage() {
                             Vence {formatDue(r.task.fechaVencimiento)}
                           </span>
                         </div>
-                      </div>
+                      </button>
 
                       <div className="hidden shrink-0 items-center gap-3 sm:flex">
                         <div className="flex -space-x-1.5">

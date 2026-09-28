@@ -1,7 +1,6 @@
 import {
   Bell,
   Calendar,
-  Inbox,
   KanbanSquare,
   LayoutDashboard,
   LayoutList,
@@ -17,19 +16,19 @@ import { useUiStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useBoardsStore } from '../store/boardsStore'
 import { useChatStore } from '../store/chatStore'
+import { useNotificationsStore } from '../store/notificationsStore'
 import { shortName } from '../lib/format'
 
 const navMain = [
   { to: '/', label: 'Panel general', icon: LayoutDashboard, end: true },
   { to: '/tableros', label: 'Tableros', icon: KanbanSquare },
-  { to: '/mis-tareas', label: 'Mis tareas', icon: LayoutList, badge: 4 },
+  { to: '/mis-tareas', label: 'Mis tareas', icon: LayoutList },
   { to: '/calendario', label: 'Calendario', icon: Calendar },
 ]
 
 const navTeam = [
   { to: '/mensajes', label: 'Mensajes', icon: MessageSquare },
-  { to: '/notificaciones', label: 'Notificaciones', icon: Bell, badge: 3 },
-  { to: '/correo', label: 'Correo del equipo', icon: Inbox },
+  { to: '/notificaciones', label: 'Notificaciones', icon: Bell },
   { to: '/miembros', label: 'Miembros', icon: Users },
 ]
 
@@ -42,7 +41,13 @@ export default function Sidebar() {
   const unreadChats = useChatStore((s) =>
     s.conversations.reduce((acc, c) => acc + c.unread, 0),
   )
+  const notificaciones = useNotificationsStore((s) => s.notificaciones)
+  const loadNotifications = useNotificationsStore((s) => s.loadNotifications)
+  const minePending = useBoardsStore((s) => s.minePending)
+  const loadMine = useBoardsStore((s) => s.loadMine)
   const navigate = useNavigate()
+
+  const unreadNotifs = notificaciones.filter((n) => !n.leida).length
 
   const sortedBoards = [...boards].sort(
     (a, b) =>
@@ -58,6 +63,14 @@ export default function Sidebar() {
   useEffect(() => {
     void loadBoards()
   }, [loadBoards, user?.id])
+
+  useEffect(() => {
+    void loadMine()
+  }, [loadMine, user?.id])
+
+  useEffect(() => {
+    void loadNotifications()
+  }, [loadNotifications, user?.id])
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `group flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
@@ -103,11 +116,11 @@ export default function Sidebar() {
                         }`}
                       />
                       {item.label}
-                      {item.badge && (
+                      {item.label === 'Mis tareas' && minePending > 0 ? (
                         <span className="ml-auto rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                          {item.badge}
+                          {minePending}
                         </span>
-                      )}
+                      ) : null}
                     </>
                   )}
                 </NavLink>
@@ -139,9 +152,9 @@ export default function Sidebar() {
                         <span className="ml-auto rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-bold text-white">
                           {unreadChats}
                         </span>
-                      ) : item.badge ? (
+                      ) : item.label === 'Notificaciones' && unreadNotifs > 0 ? (
                         <span className="ml-auto rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-600">
-                          {item.badge}
+                          {unreadNotifs}
                         </span>
                       ) : null}
                     </>
