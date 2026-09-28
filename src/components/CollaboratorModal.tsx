@@ -6,6 +6,7 @@ import {
   Mail,
   Search,
   Send,
+  ShieldCheck,
   Trash2,
   UserPlus,
   Users,
@@ -15,18 +16,34 @@ import Modal from './Modal'
 import { api } from '../lib/api'
 import { useBoardsStore } from '../store/boardsStore'
 import { useAuthStore } from '../store/authStore'
-import type { BoardDto, MemberDto, RolTablero } from '../lib/types'
+import type { BoardDto, HistorialMiembroDto, MemberDto, RolTablero } from '../lib/types'
 
 type Props = {
   boardId?: string
   onClose: () => void
 }
 
-const roles: { value: RolTablero; label: string }[] = [
-  { value: 'MIEMBRO', label: 'Miembro' },
-  { value: 'EDITOR', label: 'Editor' },
-  { value: 'LECTURA', label: 'Solo lectura' },
-  { value: 'ADMINISTRADOR', label: 'Administrador' },
+const roles: { value: RolTablero; label: string; desc: string }[] = [
+  {
+    value: 'ADMINISTRADOR',
+    label: 'Administrador',
+    desc: 'Control total: gestiona miembros, invitaciones, el tablero y las columnas.',
+  },
+  {
+    value: 'EDITOR',
+    label: 'Editor',
+    desc: 'Crea, edita y mueve tarjetas, checklists y etiquetas del tablero.',
+  },
+  {
+    value: 'MIEMBRO',
+    label: 'Miembro',
+    desc: 'Colabora en el tablero: puede crear y editar tarjetas.',
+  },
+  {
+    value: 'LECTURA',
+    label: 'Solo lectura',
+    desc: 'Únicamente consulta el tablero. No puede crear ni modificar nada.',
+  },
 ]
 
 const roleLabel: Record<string, string> = {
@@ -34,6 +51,15 @@ const roleLabel: Record<string, string> = {
   MIEMBRO: 'Miembro',
   EDITOR: 'Editor',
   LECTURA: 'Solo lectura',
+}
+
+function fechaCorta(iso: string | null | undefined) {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
 }
 
 type SearchedUser = {
@@ -82,11 +108,13 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
   const membersV = useBoardsStore((s) => s.membersV)
   const getBoard = useBoardsStore((s) => s.getBoard)
   const sendInvite = useBoardsStore((s) => s.sendInvite)
+  const updateInviteRole = useBoardsStore((s) => s.updateInviteRole)
   const cancelInvite = useBoardsStore((s) => s.cancelInvite)
 
   const [selectedBoardId, setSelectedBoardId] = useState<string>(boardId ?? '')
   const [board, setBoard] = useState<BoardDto | null>(null)
   const [pendingInvites, setPendingInvites] = useState<BoardInviteRow[]>([])
+  const [historial, setHistorial] = useState<HistorialMiembroDto[]>([])
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchedUser[]>([])
@@ -131,6 +159,7 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
           miembros: b.miembros,
         })
         setPendingInvites(b.invitaciones)
+        setHistorial(b.historialMiembros ?? [])
       })
       .catch(() => setBoard(null))
       .finally(() => {
@@ -142,11 +171,13 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
   }, [selectedBoardId, membersV, getBoard])
 
   const searching = selectedBoardId !== '' && loadedFor !== selectedBoardId
+  const activeRole = roles.find((r) => r.value === role) ?? roles[0]
 
   const selectBoard = (id: string) => {
     setSelectedBoardId(id)
     setBoard(null)
     setPendingInvites([])
+    setHistorial([])
     setErrorMsg(null)
     setSentMsg(null)
   }
@@ -187,8 +218,23 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
     }
   }
 
-  const cancelInv = async (usuarioId: string) => {
+  const changeInviteRole = async (usuarioId: string, nextRol: RolTablero) => {
     setErrorMsg(null)
+    setSentMsg(null)
+    setBusy(`role-${usuarioId}`)
+    try {
+      await updateInviteRole(selectedBoardId, usuarioId, nextRol)
+      const inv = await getBoard(selectedBoardId)
+      setPendingInvites(inv.invitaciones)
+      setSentMsg(`Invitación actualizada a ${roleLabel[nextRol]}`)
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'No se pudo cambiar el rol')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const cancelInv = async (usuarioId: string) => {    setErrorMsg(null)
     setSentMsg(null)
     try {
       await cancelInvite(selectedBoardId, usuarioId)
@@ -238,6 +284,35 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
 
       {selectedBoardId && (
         <>
+          {/* Rol con el que se invita */}
+          <div className="mb-4 rounded-xl border border-brand-200 bg-brand-50/50 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="invite-role"
+                className="flex items-center gap-1.5 text-xs font-bold text-ink-700"
+              >
+                <ShieldCheck className="h-3.5 w-3.5 text-brand-600" />
+                Rol con el que se invita
+              </label>
+              <div className="relative">
+                <select
+                  id="invite-role"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as RolTablero)}
+                  className="cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-1.5 pr-8 pl-3 text-xs font-semibold text-ink-700 outline-none transition focus:border-brand-400"
+                >
+                  {roles.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-ink-500">{activeRole?.desc}</p>
+          </div>
+
           {/* Búsqueda de usuarios */}
           <div className="relative mb-4">
             <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-ink-400" />
@@ -316,9 +391,19 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
                           type="button"
                           onClick={() => void inviteById(u.id)}
                           disabled={busy === u.id}
-                          className="shrink-0 cursor-pointer rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed"
+                          title={`Invitar como ${activeRole.label}`}
+                          className="flex shrink-0 cursor-pointer flex-col items-end rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed"
                         >
-                          {busy === u.id ? 'Enviando…' : 'Invitar'}
+                          {busy === u.id ? (
+                            'Enviando…'
+                          ) : (
+                            <>
+                              Invitar
+                              <span className="text-[10px] font-medium text-brand-100">
+                                como {activeRole.label}
+                              </span>
+                            </>
+                          )}
                         </button>
                       )}
                     </li>
@@ -371,23 +456,6 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
                 Invitar
               </button>
             </div>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-ink-500">Rol:</span>
-              <div className="relative">
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as RolTablero)}
-                  className="cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-1.5 pr-8 pl-3 text-xs font-medium text-ink-700 outline-none transition focus:border-brand-400"
-                >
-                  {roles.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
-              </div>
-            </div>
           </div>
 
           {/* Invitaciones pendientes */}
@@ -417,9 +485,23 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
                         {i.usuario.email} · {roleLabel[i.rol]}
                       </p>
                     </div>
-                    <span className="rounded-md bg-surface px-2.5 py-1 text-[11px] font-semibold text-amber-600 ring-1 ring-amber-200">
-                      Pendiente
-                    </span>
+                    <div className="relative shrink-0">
+                      <select
+                        value={i.rol}
+                        disabled={busy === `role-${i.usuario.id}`}
+                        onChange={(e) => void changeInviteRole(i.usuario.id, e.target.value as RolTablero)}
+                        title="Cambiar el rol de la invitación"
+                        aria-label={`Rol de la invitación a ${i.usuario.nombre}`}
+                        className="cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-1.5 pr-7 pl-2.5 text-[11px] font-semibold text-ink-700 outline-none transition focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {roles.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute top-1/2 right-2 h-3 w-3 -translate-y-1/2 text-ink-400" />
+                    </div>
                     <button
                       type="button"
                       onClick={() => void cancelInv(i.usuario.id)}
@@ -466,7 +548,22 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
                             </span>
                           )}
                         </p>
-                        <p className="truncate text-xs text-ink-400">{m.email}</p>
+                        <p className="truncate text-xs text-ink-400">
+                          {m.email}
+                          {m.invitadoAt && (
+                            <span> · Invitado el {fechaCorta(m.invitadoAt)}</span>
+                          )}
+                          {m.ingresoAt && <span> · Se unió el {fechaCorta(m.ingresoAt)}</span>}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-ink-400">
+                          {m.online ? (
+                            <span className="font-semibold text-emerald-600">● En línea</span>
+                          ) : m.ultimoVistoAt ? (
+                            <>Visto por última vez el {fechaCorta(m.ultimoVistoAt)}</>
+                          ) : (
+                            'Ausente'
+                          )}
+                        </p>
                       </div>
                       <span className="shrink-0 rounded-md bg-ink-100 px-2.5 py-1 text-[11px] font-semibold text-ink-600">
                         {roleLabel[m.rol]}
@@ -476,6 +573,39 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
                 </ul>
               </div>
             )
+          )}
+
+          {historial.length > 0 && (
+            <div className="mt-6">
+              <p className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+                Historial de miembros ({historial.length})
+              </p>
+              <ul className="space-y-2">
+                {historial.map((h) => (
+                  <li
+                    key={`${h.usuario.id}-${h.salidaAt}`}
+                    className="flex items-center gap-3 rounded-xl border border-dashed border-ink-200 bg-ink-50/60 p-3 opacity-80"
+                  >
+                    <Avatar
+                      initials={h.usuario.iniciales}
+                      color={h.usuario.avatarColor}
+                      name={`${h.usuario.nombre} ${h.usuario.apellidos}`}
+                      size="sm"
+                      className="opacity-60 grayscale"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink-700">
+                        {h.usuario.nombre} {h.usuario.apellidos}
+                      </p>
+                      <p className="truncate text-xs text-ink-400">
+                        {roleLabel[h.rol]} · Entró el {fechaCorta(h.ingresoAt)} · Salió el{' '}
+                        {fechaCorta(h.salidaAt)}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </>
       )}
