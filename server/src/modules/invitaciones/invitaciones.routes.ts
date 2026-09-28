@@ -4,6 +4,8 @@ import { requireAuth, type AuthedRequest } from '../../middleware/auth'
 import { basicUser } from '../../lib/serialize'
 import { crearNotificacion } from '../../lib/notificaciones'
 import { userSelect } from '../../lib/tasks'
+import { registrarActividad } from '../../lib/actividades'
+import { registrarIngreso } from '../../lib/membresias'
 
 const router = Router()
 router.use(requireAuth)
@@ -115,6 +117,15 @@ router.post('/:id/aceptar', async (req: Request, res: Response) => {
         create: { tableroId: invite.tableroId, usuarioId: userId, rol: invite.rol },
         update: {},
       })
+  })
+
+  await registrarIngreso(invite.tableroId, userId, invite.rol)
+  await registrarActividad({
+    tableroId: invite.tableroId,
+    autorId: userId,
+    tipo: 'MIEMBRO_UNIDO',
+    usuarioId: userId,
+    detalle: `Se unió al tablero «${invite.tablero.nombre}»`,
   })
 
   if (invite.creadoPorId !== userId) {

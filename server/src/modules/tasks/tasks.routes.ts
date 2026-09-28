@@ -3,10 +3,12 @@ import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import {
   isBoardMember,
+  notificarTareaCambiada,
   serializeTaskDetail,
   taskDetailInclude,
 } from '../../lib/tasks'
 import { requireAuth, type AuthedRequest } from '../../middleware/auth'
+import { registrarActividad } from '../../lib/actividades'
 
 const router = Router()
 router.use(requireAuth)
@@ -43,6 +45,7 @@ const updateTaskSchema = z.object({
   fechaVencimiento: isoDate,
   columnaId: z.string().min(1).optional(),
   posicion: z.number().int().nonnegative().optional(),
+  orden: z.array(z.string().min(1)).optional(),
   etiquetas: z.array(labelSchema).optional(),
   asignados: z.array(z.string()).optional(),
   checklist: z
@@ -58,8 +61,12 @@ const updateTaskSchema = z.object({
 async function taskWithBoard(id: string) {
   return prisma.tarea.findUnique({
     where: { id },
-    include: { columna: { select: { id: true, tableroId: true } } },
+    include: { columna: { select: { id: true, tableroId: true, titulo: true } } },
   })
+}
+
+function prioridadLabel(p: string) {
+  return { ALTA: 'alta', MEDIA: 'media', BAJA: 'baja' }[p] ?? p.toLowerCase()
 }
 
 async function ensureEtiquetas(
@@ -143,7 +150,29 @@ router.post('/', async (req: Request, res: Response) => {
   })
 
   const task = await getTaskDetail(id)
+  await notificarTareaCambiada(columna.tableroId, userId)
+  await registrarActividad({
+    tableroId: columna.tableroId,
+    autorId: userId,
+    tipo: 'TAREA_CREADA',
+    tareaId: id,
+    detalle: `Creó la tarjeta «${titulo}» en ${columna.titulo}`,
+  })
   res.status(201).json({ task: task ? serializeTaskDetail(task) : null })
+})
+
+// GET /api/tasks/mine — conteo de tareas asignadas al usuario
+router.get('/mine', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const asignaciones = await prisma.tareaAsignacion.findMany({
+    where: { usuarioId: userId },
+    select: { tarea: { select: { columna: { select: { titulo: true } } } } },
+  })
+  const total = asignaciones.length
+  const pendientes = asignaciones.filter(
+    (a) => a.tarea.columna.titulo.toUpperCase() !== 'TERMINADO',
+  ).length
+  res.json({ total, pendientes })
 })
 
 // GET /api/tasks/:id — detalle de una tarjeta
@@ -191,6 +220,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     fechaVencimiento,
     columnaId,
     posicion,
+    orden,
     etiquetas,
     asignados,
     checklist,
@@ -198,6 +228,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
   let tableroId = found.columna.tableroId
   let nuevaColumna = found.columna.id
+  let tituloDestino: string | null = null
 
   if (columnaId && columnaId !== found.columna.id) {
     const destino = await prisma.columna.findUnique({ where: { id: columnaId } })
@@ -212,6 +243,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
     tableroId = destino.tableroId
     nuevaColumna = destino.id
+    tituloDestino = destino.titulo
 
     if (posicion === undefined) {
       const count = await prisma.tarea.count({ where: { columnaId: nuevaColumna } })
@@ -262,7 +294,43 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
   })
 
+  if (columnaId && orden !== undefined) {
+    await prisma.$transaction(
+      orden.map((taskId, index) =>
+        prisma.tarea.update({
+          where: { id: taskId },
+          data: { posicion: index },
+        }),
+      ),
+    )
+  }
+
   const task = await getTaskDetail(id)
+  await notificarTareaCambiada(tableroId, userId)
+
+  if (prioridadSel !== undefined && prioridadSel !== found.prioridad) {
+    await registrarActividad({
+      tableroId,
+      autorId: userId,
+      tipo: 'PRIORIDAD_CAMBIADA',
+      tareaId: id,
+      de: found.prioridad,
+      a: prioridadSel,
+      detalle: `Cambió la prioridad de «${found.titulo}» a ${prioridadLabel(prioridadSel)}`,
+    })
+  }
+  if (tituloDestino) {
+    await registrarActividad({
+      tableroId,
+      autorId: userId,
+      tipo: 'TAREA_MOVIDA',
+      tareaId: id,
+      de: found.columna.titulo,
+      a: tituloDestino,
+      detalle: `Movió «${found.titulo}» a ${tituloDestino}`,
+    })
+  }
+
   res.json({ task: task ? serializeTaskDetail(task) : null })
 })
 
@@ -282,6 +350,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 
   await prisma.tarea.delete({ where: { id } })
+  await notificarTareaCambiada(found.columna.tableroId, userId)
+  await registrarActividad({
+    tableroId: found.columna.tableroId,
+    autorId: userId,
+    tipo: 'TAREA_ELIMINADA',
+    detalle: `Eliminó la tarjeta «${found.titulo}»`,
+  })
   res.status(204).end()
 })
 

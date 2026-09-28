@@ -11,6 +11,9 @@ import {
 import { prisma } from '../../lib/prisma'
 import { requireAuth, type AuthedRequest } from '../../middleware/auth'
 import { crearNotificacion } from '../../lib/notificaciones'
+import { registrarActividad, serializeActividad } from '../../lib/actividades'
+import { registrarIngreso, registrarSalida } from '../../lib/membresias'
+import { emitToUsers } from '../../lib/socket'
 
 const router = Router()
 router.use(requireAuth)
@@ -45,6 +48,17 @@ const addMemberSchema = z.object({
   rol: memberRolSchema,
 })
 const updateMemberSchema = z.object({ rol: memberRolSchema })
+
+const columnaSchema = z.object({
+  titulo: z.string().trim().min(1, 'El nombre de la columna no puede estar vacío').max(100),
+  color: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/, 'El color debe ser un hexadecimal de 6 dígitos')
+    .optional(),
+})
+
+const ordenColumnasSchema = z.object({ ids: z.array(z.string()).min(1) })
 const sendInviteSchema = z.object({
   usuarioId: z.string().min(1).optional(),
   email: z.string().email().optional(),
@@ -126,7 +140,36 @@ function serializeBoardList(b: BoardListRow, usuarioId: string) {
   }
 }
 
-function serializeBoardDetail(b: BoardDetailRow, usuarioId: string) {
+function nombreCompleto(u?: { nombre?: string; apellidos?: string } | null) {
+  return u ? `${u.nombre} ${u.apellidos}`.trim() : 'Alguien'
+}
+
+type MembresiaRow = Prisma.MembresiaGetPayload<{
+  include: { usuario: { select: typeof userSelect } }
+}>
+
+function serializeBoardDetail(
+  b: BoardDetailRow,
+  usuarioId: string,
+  extras?: { membresias?: MembresiaRow[]; invitacionesAll?: { usuarioId: string; createdAt: Date }[] },
+) {
+  const membresias = extras?.membresias ?? []
+  const invitadoMap = new Map<string, string>()
+  for (const inv of extras?.invitacionesAll ?? []) {
+    if (!invitadoMap.has(inv.usuarioId)) {
+      invitadoMap.set(inv.usuarioId, inv.createdAt.toISOString())
+    }
+  }
+  const activasByUser = new Map<string, MembresiaRow>()
+  const historial: MembresiaRow[] = []
+  for (const m of membresias) {
+    if (m.salidaAt) {
+      historial.push(m)
+    } else if (!activasByUser.has(m.usuarioId)) {
+      activasByUser.set(m.usuarioId, m)
+    }
+  }
+
   return {
     id: b.id,
     nombre: b.nombre,
@@ -137,7 +180,12 @@ function serializeBoardDetail(b: BoardDetailRow, usuarioId: string) {
     esFavorito: b.favoritos.some((f) => f.usuarioId === usuarioId),
     updatedAt: b.updatedAt.toISOString(),
     creadoPor: basicUser(b.creadoPor),
-    miembros: b.miembros.map((m) => memberDto(m)),
+    miembros: b.miembros.map((m) =>
+      memberDto(m, {
+        ingresoAt: activasByUser.get(m.usuario.id)?.ingresoAt.toISOString() ?? null,
+        invitadoAt: invitadoMap.get(m.usuario.id) ?? null,
+      }),
+    ),
     etiquetas: b.etiquetas.map((e) => ({
       id: e.id,
       texto: e.texto,
@@ -157,6 +205,16 @@ function serializeBoardDetail(b: BoardDetailRow, usuarioId: string) {
       posicion: c.posicion,
       tareas: c.tareas.map(serializeTaskDetail),
     })),
+    historialMiembros: historial.map((m) => ({
+      usuario: {
+        ...basicUser(m.usuario),
+        online: m.usuario.esOnline ?? false,
+        ultimoVistoAt: m.usuario.ultimoVistoAt?.toISOString() ?? null,
+      },
+      rol: m.rol,
+      ingresoAt: m.ingresoAt.toISOString(),
+      salidaAt: m.salidaAt!.toISOString(),
+    })),
   }
 }
 
@@ -171,6 +229,28 @@ async function isMember(boardId: string, usuarioId: string) {
   return prisma.tableroMiembro.findUnique({
     where: { tableroId_usuarioId: { tableroId: boardId, usuarioId } },
   })
+}
+
+async function editableMember(res: Response, boardId: string, usuarioId: string) {
+  const member = await isMember(boardId, usuarioId)
+  if (!member) {
+    res.status(404).json({ error: 'Tablero no encontrado' })
+    return null
+  }
+  if (member.rol === 'LECTURA') {
+    res.status(403).json({ error: 'Tu rol no permite modificar las columnas' })
+    return null
+  }
+  return member
+}
+
+async function notificarColumnasCambiadas(boardId: string, usuarioId: string) {
+  const miembros = await prisma.tableroMiembro.findMany({
+    where: { tableroId: boardId },
+    select: { usuarioId: true },
+  })
+  const ids = [...new Set([...miembros.map((m) => m.usuarioId), usuarioId])]
+  await emitToUsers(ids, 'columna:cambio', { tableroId: boardId })
 }
 
 // GET /api/boards — listar tableros del usuario logueado
@@ -196,7 +276,212 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.status(404).json({ error: 'Tablero no encontrado' })
     return
   }
-  res.json({ board: serializeBoardDetail(board, userId) })
+  const [membresias, invitacionesAll] = await Promise.all([
+    prisma.membresia.findMany({
+      where: { tableroId: id },
+      orderBy: { ingresoAt: 'asc' as const },
+      include: { usuario: { select: userSelect } },
+    }),
+    prisma.invitacion.findMany({
+      where: { tableroId: id },
+      select: { usuarioId: true, createdAt: true },
+      orderBy: { createdAt: 'asc' as const },
+    }),
+  ])
+  res.json({
+    board: serializeBoardDetail(board, userId, { membresias, invitacionesAll }),
+  })
+})
+
+// GET /api/boards/:id/actividades — historial de actividades del tablero
+router.get('/:id/actividades', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const member = await isMember(id, userId)
+  if (!member) {
+    res.status(404).json({ error: 'Tablero no encontrado' })
+    return
+  }
+  const actividades = await prisma.actividad.findMany({
+    where: { tableroId: id },
+    orderBy: { createdAt: 'desc' as const },
+    take: 200,
+    include: {
+      autor: { select: userSelect },
+      usuario: { select: userSelect },
+    },
+  })
+  res.json({ actividades: actividades.map(serializeActividad) })
+})
+
+// POST /api/boards/:id/columnas — agregar columna al final del tablero
+router.post('/:id/columnas', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const parsed = columnaSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
+    return
+  }
+
+  const ultima = await prisma.columna.findFirst({
+    where: { tableroId: id },
+    orderBy: { posicion: 'desc' as const },
+    select: { posicion: true },
+  })
+  const columna = await prisma.columna.create({
+    data: {
+      tableroId: id,
+      titulo: parsed.data.titulo,
+      color: parsed.data.color ?? '#94a3b8',
+      posicion: (ultima?.posicion ?? -1) + 1,
+    },
+  })
+  await notificarColumnasCambiadas(id, userId)
+  res.status(201).json({ columna })
+})
+
+// PUT /api/boards/:id/columnas/orden — reordenar columnas (debe ir antes de :columnaId)
+router.put('/:id/columnas/orden', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const parsed = ordenColumnasSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Orden de columnas inválido' })
+    return
+  }
+
+  const actuales = await prisma.columna.findMany({
+    where: { tableroId: id },
+    select: { id: true },
+  })
+  const actualesIds = new Set(actuales.map((c) => c.id))
+  const ids = parsed.data.ids
+  if (ids.length !== actualesIds.size || ids.some((cid) => !actualesIds.has(cid))) {
+    res.status(400).json({ error: 'El orden debe incluir todas las columnas del tablero' })
+    return
+  }
+
+  await prisma.$transaction(
+    ids.map((cid, i) =>
+      prisma.columna.update({ where: { id: cid }, data: { posicion: i } }),
+    ),
+  )
+  await notificarColumnasCambiadas(id, userId)
+  const columnas = await prisma.columna.findMany({
+    where: { tableroId: id },
+    orderBy: { posicion: 'asc' as const },
+  })
+  res.json({ columnas })
+})
+
+// PUT /api/boards/:id/columnas/:columnaId — renombrar o cambiar color
+router.put('/:id/columnas/:columnaId', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const columnaId = String(req.params.columnaId)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const found = await prisma.columna.findFirst({
+    where: { id: columnaId, tableroId: id },
+  })
+  if (!found) {
+    res.status(404).json({ error: 'Columna no encontrada' })
+    return
+  }
+
+  const parsed = columnaSchema.partial().safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
+    return
+  }
+  if (parsed.data.titulo === undefined && parsed.data.color === undefined) {
+    res.status(400).json({ error: 'Envía al menos el título o el color' })
+    return
+  }
+
+  const columna = await prisma.columna.update({
+    where: { id: columnaId },
+    data: {
+      ...(parsed.data.titulo !== undefined ? { titulo: parsed.data.titulo } : {}),
+      ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
+    },
+  })
+  await notificarColumnasCambiadas(id, userId)
+  res.json({ columna })
+})
+
+// DELETE /api/boards/:id/columnas/:columnaId — eliminar columna
+router.delete('/:id/columnas/:columnaId', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const columnaId = String(req.params.columnaId)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const found = await prisma.columna.findFirst({
+    where: { id: columnaId, tableroId: id },
+    include: { _count: { select: { tareas: true } } },
+  })
+  if (!found) {
+    res.status(404).json({ error: 'Columna no encontrada' })
+    return
+  }
+
+  const total = await prisma.columna.count({ where: { tableroId: id } })
+  if (total <= 1) {
+    res.status(400).json({ error: 'El tablero debe tener al menos una columna' })
+    return
+  }
+
+  const moverA = typeof req.query.moverA === 'string' ? req.query.moverA : ''
+  if (found._count.tareas > 0) {
+    if (!moverA) {
+      res.status(400).json({
+        error: 'La columna tiene tareas. Indica a qué columna moverlas con ?moverA=',
+        requiereDestino: true,
+        tareas: found._count.tareas,
+      })
+      return
+    }
+    const destino = await prisma.columna.findFirst({
+      where: { id: moverA, tableroId: id },
+    })
+    if (!destino) {
+      res.status(400).json({ error: 'La columna destino no pertenece al tablero' })
+      return
+    }
+    await prisma.$transaction(async (tx) => {
+      const destinoTareas = await tx.tarea.count({ where: { columnaId: destino.id } })
+      await tx.tarea.updateMany({
+        where: { columnaId: found.id },
+        data: { columnaId: destino.id, posicion: destinoTareas },
+      })
+      await tx.columna.delete({ where: { id: found.id } })
+      await tx.columna.updateMany({
+        where: { tableroId: id, posicion: { gt: found.posicion } },
+        data: { posicion: { decrement: 1 } },
+      })
+    })
+  } else {
+    await prisma.$transaction(async (tx) => {
+      await tx.columna.delete({ where: { id: found.id } })
+      await tx.columna.updateMany({
+        where: { tableroId: id, posicion: { gt: found.posicion } },
+        data: { posicion: { decrement: 1 } },
+      })
+    })
+  }
+
+  await notificarColumnasCambiadas(id, userId)
+  res.status(204).end()
 })
 
 // POST /api/boards — crear tablero (creador como Administrador y columnas iniciales)
@@ -235,6 +520,14 @@ router.post('/', async (req: Request, res: Response) => {
     )
 
     return nuevo
+  })
+
+  await registrarIngreso(created.id, userId, 'ADMINISTRADOR')
+  await registrarActividad({
+    tableroId: created.id,
+    autorId: userId,
+    tipo: 'TABLERO_CREADO',
+    detalle: `Creó el tablero «${nombre}»`,
   })
 
   const board = await boardForUser(created.id, userId)
@@ -348,12 +641,27 @@ router.post('/:id/members', async (req: Request, res: Response) => {
     return
   }
 
+  const alreadyMember = await isMember(id, parsed.data.usuarioId)
   const row = await prisma.tableroMiembro.upsert({
     where: { tableroId_usuarioId: { tableroId: id, usuarioId: parsed.data.usuarioId } },
     create: { tableroId: id, usuarioId: parsed.data.usuarioId, rol: parsed.data.rol },
     update: { rol: parsed.data.rol },
     include: { usuario: { select: userSelect } },
   })
+  if (!alreadyMember) {
+    await registrarIngreso(id, parsed.data.usuarioId, parsed.data.rol)
+    const target = await prisma.usuario.findUnique({
+      where: { id: parsed.data.usuarioId },
+      select: { nombre: true, apellidos: true },
+    })
+    await registrarActividad({
+      tableroId: id,
+      autorId: userId,
+      tipo: 'MIEMBRO_UNIDO',
+      usuarioId: parsed.data.usuarioId,
+      detalle: `Añadió a ${nombreCompleto(target)} al tablero`,
+    })
+  }
   res.status(201).json({ member: memberDto(row) })
 })
 
@@ -390,6 +698,7 @@ router.put('/:id/members/:usuarioId', async (req: Request, res: Response) => {
     data: { rol: parsed.data.rol },
     include: { usuario: { select: userSelect } },
   })
+  await registrarIngreso(id, targetId, parsed.data.rol)
   res.json({ member: memberDto(row) })
 })
 
@@ -426,6 +735,18 @@ router.delete('/:id/members/:usuarioId', async (req: Request, res: Response) => 
 
   await prisma.tableroMiembro.delete({
     where: { tableroId_usuarioId: { tableroId: id, usuarioId: targetId } },
+  })
+  await registrarSalida(id, targetId)
+  const targetUser = await prisma.usuario.findUnique({
+    where: { id: targetId },
+    select: { nombre: true, apellidos: true },
+  })
+  await registrarActividad({
+    tableroId: id,
+    autorId: userId,
+    tipo: 'MIEMBRO_REMOVIDO',
+    usuarioId: targetId,
+    detalle: `Quitó a ${nombreCompleto(targetUser)} del tablero`,
   })
   res.status(204).end()
 })
@@ -472,7 +793,7 @@ async function inviteUser(
 ) {
   const target = await prisma.usuario.findUnique({
     where: { id: usuarioId },
-    select: { id: true, estado: true },
+    select: { id: true, estado: true, nombre: true, apellidos: true },
   })
   if (!target || target.estado !== 'ACTIVO') {
     res.status(404).json({ error: 'Usuario no encontrado' })
@@ -517,9 +838,52 @@ async function inviteUser(
     tableroId: id,
     invitacionId: invitacion.id,
   })
+  await registrarActividad({
+    tableroId: id,
+    autorId: userId,
+    tipo: 'MIEMBRO_INVITADO',
+    usuarioId,
+    detalle: `Invitó a ${nombreCompleto(target)} al tablero`,
+  })
 
   res.status(201).json({ invitacion })
 }
+
+// PUT /api/boards/:id/invitaciones/:usuarioId — cambiar el rol de una invitación pendiente
+router.put(
+  '/:id/invitaciones/:usuarioId',
+  async (req: Request, res: Response) => {
+    const { userId } = req as AuthedRequest
+    const id = String(req.params.id)
+    const usuarioId = String(req.params.usuarioId)
+    const admin = await requireAdmin(res, id, userId)
+    if (!admin) return
+
+    const parsed = updateMemberSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Rol no válido' })
+      return
+    }
+
+    const invite = await prisma.invitacion.findUnique({
+      where: { tableroId_usuarioId: { tableroId: id, usuarioId } },
+    })
+    if (!invite) {
+      res.status(404).json({ error: 'No existe una invitación para este usuario' })
+      return
+    }
+    if (invite.estado !== 'PENDIENTE') {
+      res.status(400).json({ error: 'Solo se puede cambiar el rol de una invitación pendiente' })
+      return
+    }
+
+    const invitacion = await prisma.invitacion.update({
+      where: { id: invite.id },
+      data: { rol: parsed.data.rol },
+    })
+    res.json({ invitacion })
+  },
+)
 
 // DELETE /api/boards/:id/invitaciones/:usuarioId — cancelar invitación pendiente (solo admin)
 router.delete(
