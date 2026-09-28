@@ -1,20 +1,26 @@
-import { useState } from 'react'
-import { Check, ChevronDown, RotateCcw, SlidersHorizontal } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { Check, ChevronDown, LoaderCircle, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import Modal from '../Modal'
 import Avatar from '../Avatar'
-import { team } from '../../data/mock'
+import { useBoardsStore } from '../../store/boardsStore'
+import { useFiltersStore } from '../../store/filtersStore'
+import {
+  countActiveFilters,
+  isDoneColumn,
+  taskMatchesFilters,
+  type DueFilter,
+  type TaskFilters,
+} from '../../lib/filters'
+import type { BoardDetailDto, Prioridad } from '../../lib/types'
 
 type Props = { onClose: () => void }
 
-const labelOptions = [
-  { text: 'Frontend', color: '#6366f1' },
-  { text: 'Backend', color: '#ef4444' },
-  { text: 'Diseño', color: '#8b5cf6' },
-  { text: 'QA', color: '#10b981' },
-  { text: 'DevOps', color: '#0ea5e9' },
+const priorities: { value: Prioridad; label: string }[] = [
+  { value: 'ALTA', label: 'Alta' },
+  { value: 'MEDIA', label: 'Media' },
+  { value: 'BAJA', label: 'Baja' },
 ]
-
-const priorities = ['Alta', 'Media', 'Baja']
 
 function ChipFilter({
   label,
@@ -45,11 +51,33 @@ function ChipFilter({
 }
 
 export default function FiltersModal({ onClose }: Props) {
-  const [members, setMembers] = useState<string[]>([])
-  const [labels, setLabels] = useState<string[]>([])
-  const [prio, setPrio] = useState<string | null>(null)
-  const [due, setDue] = useState('any')
-  const [showDone, setShowDone] = useState(false)
+  const { boardId } = useParams()
+  const getBoard = useBoardsStore((s) => s.getBoard)
+  const setFilters = useFiltersStore((s) => s.setFilters)
+  const stored = useFiltersStore((s) => s.filters)
+  const isStored = boardId !== undefined && stored.boardId === boardId
+
+  const [board, setBoard] = useState<BoardDetailDto | null>(null)
+  const [members, setMembers] = useState<string[]>(isStored ? stored.members : [])
+  const [labels, setLabels] = useState<string[]>(isStored ? stored.labels : [])
+  const [prio, setPrio] = useState<Prioridad | null>(isStored ? stored.prio : null)
+  const [due, setDue] = useState<DueFilter>(isStored ? stored.due : 'any')
+  const [showDone, setShowDone] = useState(isStored ? stored.showDone : true)
+
+  useEffect(() => {
+    if (!boardId) return
+    let active = true
+    getBoard(boardId)
+      .then((b) => {
+        if (active) setBoard(b)
+      })
+      .catch(() => {
+        if (active) setBoard(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [boardId, getBoard])
 
   const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
@@ -59,11 +87,39 @@ export default function FiltersModal({ onClose }: Props) {
     setLabels([])
     setPrio(null)
     setDue('any')
-    setShowDone(false)
+    setShowDone(true)
   }
 
-  const activeCount =
-    members.length + labels.length + (prio ? 1 : 0) + (due !== 'any' ? 1 : 0) + (showDone ? 1 : 0)
+  const local: TaskFilters = {
+    boardId: boardId ?? null,
+    members,
+    labels,
+    prio,
+    due,
+    showDone,
+  }
+
+  const matchedTasks = useMemo(() => {
+    if (!board) return 0
+    const filtro: TaskFilters = { boardId: board.id, members, labels, prio, due, showDone }
+    return board.columnas
+      .filter((c) => showDone || !isDoneColumn(c.titulo))
+      .reduce((acc, c) => acc + c.tareas.filter((t) => taskMatchesFilters(t, filtro)).length, 0)
+  }, [board, members, labels, prio, due, showDone])
+
+  const selectedMembers = useMemo(
+    () => (board ? board.miembros.filter((m) => members.includes(m.id)) : []),
+    [board, members],
+  )
+
+  const activeCount = countActiveFilters(local)
+
+  const apply = () => {
+    if (boardId) {
+      setFilters(boardId, { members, labels, prio, due, showDone })
+    }
+    onClose()
+  }
 
   return (
     <Modal
@@ -86,117 +142,143 @@ export default function FiltersModal({ onClose }: Props) {
             <button type="button" onClick={onClose} className="btn-ghost">
               Cancelar
             </button>
-            <button type="button" onClick={onClose} className="btn-primary">
+            <button type="button" onClick={apply} className="btn-primary">
               Aplicar {activeCount > 0 && `(${activeCount})`}
             </button>
           </div>
         </>
       }
     >
-      <div className="space-y-5">
-        {/* Miembros */}
-        <div>
-          <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-            Miembros
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {team.map((p) => (
-              <ChipFilter
-                key={p.id}
-                label={p.name.split(' ')[0]}
-                active={members.includes(p.id)}
-                onClick={() => toggle(members, setMembers, p.id)}
-              />
-            ))}
-          </div>
+      {!board ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-sm text-ink-400">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+          Cargando opciones del tablero…
         </div>
-
-        {/* Etiquetas */}
-        <div>
-          <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-            Etiquetas
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {labelOptions.map((l) => (
-              <ChipFilter
-                key={l.text}
-                label={l.text}
-                color={l.color}
-                active={labels.includes(l.text)}
-                onClick={() => toggle(labels, setLabels, l.text)}
-              />
-            ))}
+      ) : (
+        <div className="space-y-5">
+          {/* Miembros */}
+          <div>
+            <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+              Miembros
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {board.miembros.length === 0 && (
+                <span className="text-xs text-ink-400">Sin miembros todavía.</span>
+              )}
+              {board.miembros.map((m) => (
+                <ChipFilter
+                  key={m.id}
+                  label={m.nombre}
+                  active={members.includes(m.id)}
+                  onClick={() => toggle(members, setMembers, m.id)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Prioridad */}
-        <div>
-          <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-            Prioridad
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {priorities.map((p) => (
-              <ChipFilter
-                key={p}
-                label={p}
-                active={prio === p}
-                onClick={() => setPrio(prio === p ? null : p)}
-              />
-            ))}
+          {/* Etiquetas */}
+          <div>
+            <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+              Etiquetas
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {board.etiquetas.length === 0 && (
+                <span className="text-xs text-ink-400">Sin etiquetas todavía.</span>
+              )}
+              {board.etiquetas.map((l) => (
+                <ChipFilter
+                  key={l.id}
+                  label={l.texto}
+                  color={l.color}
+                  active={labels.includes(l.texto)}
+                  onClick={() => toggle(labels, setLabels, l.texto)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Vencimiento */}
-        <div>
-          <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-            Vencimiento
-          </label>
-          <div className="relative w-full max-w-[220px]">
-            <select
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-              className="w-full cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-2 pr-8 pl-3 text-sm text-ink-700 outline-none focus:border-brand-400"
-            >
-              <option value="any">Cualquier fecha</option>
-              <option value="today">Vence hoy</option>
-              <option value="week">Esta semana</option>
-              <option value="overdue">Vencidas</option>
-              <option value="none">Sin fecha</option>
-            </select>
-            <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-ink-400" />
+          {/* Prioridad */}
+          <div>
+            <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+              Prioridad
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {priorities.map((p) => (
+                <ChipFilter
+                  key={p.value}
+                  label={p.label}
+                  active={prio === p.value}
+                  onClick={() => setPrio(prio === p.value ? null : p.value)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Terminadas */}
-        <label className="flex cursor-pointer items-center justify-between rounded-xl border border-ink-200 bg-ink-50 p-3">
-          <span>
-            <p className="text-sm font-semibold text-ink-800">Tareas terminadas</p>
-            <p className="text-xs text-ink-400">Ocultar o mostrar la columna Terminado</p>
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowDone((v) => !v)}
-            className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition ${
-              showDone ? 'bg-brand-600' : 'bg-ink-300'
-            }`}
-            aria-label="Alternar tareas terminadas"
-          >
-            <span
-              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
-                showDone ? 'left-[22px]' : 'left-0.5'
+          {/* Vencimiento */}
+          <div>
+            <label className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
+              Vencimiento
+            </label>
+            <div className="relative w-full max-w-[220px]">
+              <select
+                value={due}
+                onChange={(e) => setDue(e.target.value as DueFilter)}
+                className="w-full cursor-pointer appearance-none rounded-lg border border-ink-200 bg-surface py-2 pr-8 pl-3 text-sm text-ink-700 outline-none focus:border-brand-400"
+              >
+                <option value="any">Cualquier fecha</option>
+                <option value="today">Vence hoy</option>
+                <option value="week">Esta semana</option>
+                <option value="overdue">Vencidas</option>
+                <option value="none">Sin fecha</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            </div>
+          </div>
+
+          {/* Terminadas */}
+          <label className="flex cursor-pointer items-center justify-between rounded-xl border border-ink-200 bg-ink-50 p-3">
+            <span>
+              <p className="text-sm font-semibold text-ink-800">Tareas terminadas</p>
+              <p className="text-xs text-ink-400">Ocultar o mostrar la columna Terminado</p>
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowDone((v) => !v)}
+              className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition ${
+                showDone ? 'bg-brand-600' : 'bg-ink-300'
               }`}
-            />
-          </button>
-        </label>
-      </div>
+              aria-label="Mostrar u ocultar la columna Terminado"
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                  showDone ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </label>
+        </div>
+      )}
 
       {/* Vista previa de miembros */}
       <div className="mt-5 flex items-center justify-between border-t border-ink-100 pt-4">
         <span className="text-xs text-ink-400">Resultado previsto</span>
         <div className="flex items-center gap-2">
-          <Avatar initials="AG" color="#6366f1" name="Ana García" size="xs" />
-          <Avatar initials="CR" color="#f59e0b" name="Carlos Ruiz" size="xs" />
-          <span className="text-xs text-ink-400">6 tareas coinciden</span>
+          {selectedMembers.length > 0 ? (
+            selectedMembers.slice(0, 3).map((m) => (
+              <Avatar
+                key={m.id}
+                initials={m.iniciales}
+                color={m.avatarColor}
+                name={`${m.nombre} ${m.apellidos}`}
+                size="xs"
+              />
+            ))
+          ) : (
+            <Avatar initials="—" color="#94a3b8" size="xs" />
+          )}
+          <span className="text-xs text-ink-400">
+            {board ? `${matchedTasks} ${matchedTasks === 1 ? 'tarea coincide' : 'tareas coinciden'}` : '—'}
+          </span>
         </div>
       </div>
     </Modal>
