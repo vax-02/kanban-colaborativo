@@ -44,6 +44,17 @@ enum TipoNotificacion {
   INVITACION_RECHAZADA
 }
 
+enum TipoActividad {
+  TABLERO_CREADO
+  TAREA_CREADA
+  TAREA_MOVIDA
+  TAREA_ELIMINADA
+  PRIORIDAD_CAMBIADA
+  MIEMBRO_INVITADO
+  MIEMBRO_UNIDO
+  MIEMBRO_REMOVIDO
+}
+
 model Usuario {
   id            String        @id @default(uuid()) @db.VarChar(36)
   nombre        String        @db.VarChar(100)
@@ -69,6 +80,9 @@ model Usuario {
   invitacionesEnviadas   Invitacion[]          @relation("InvitacionCreador")
   invitacionesRecibidas  Invitacion[]          @relation("InvitacionUsuario")
   notificaciones         Notificacion[]
+  actividadesAutor       Actividad[]           @relation("ActividadAutor")
+  actividadesRelacionadas Actividad[]           @relation("ActividadUsuario")
+  membresias             Membresia[]
 
   @@map("usuarios")
 }
@@ -91,6 +105,8 @@ model Tablero {
   favoritos FavoritoTablero[]
   invitaciones Invitacion[]
   notificaciones Notificacion[]
+  actividades Actividad[]
+  membresias Membresia[]
 
   @@map("tableros")
 }
@@ -165,6 +181,7 @@ model Tarea {
   etiquetas    TareaEtiqueta[]
   asignaciones TareaAsignacion[]
   checklist    ChecklistItem[]
+  actividades  Actividad[]
 
   @@index([columnaId])
   @@index([creadoPorId])
@@ -302,4 +319,42 @@ model Notificacion {
   @@index([usuarioId])
   @@index([tableroId])
   @@map("notificaciones")
+}
+
+model Actividad {
+  id        String        @id @default(uuid()) @db.VarChar(36)
+  tableroId String        @map("tablero_id") @db.VarChar(36)
+  autorId   String?       @map("autor_id") @db.VarChar(36)
+  tipo      TipoActividad
+  tareaId   String?       @map("tarea_id") @db.VarChar(36)
+  usuarioId String?       @map("usuario_id") @db.VarChar(36)
+  detalle   String?       @db.VarChar(500)
+  de        String?       @db.VarChar(100)
+  a         String?       @db.VarChar(100)
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  tablero Tablero  @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  autor   Usuario? @relation("ActividadAutor", fields: [autorId], references: [id], onDelete: SetNull)
+  tarea   Tarea?   @relation(fields: [tareaId], references: [id], onDelete: SetNull)
+  usuario Usuario? @relation("ActividadUsuario", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([tableroId])
+  @@index([tableroId, createdAt])
+  @@map("actividades")
+}
+
+model Membresia {
+  id        String      @id @default(uuid()) @db.VarChar(36)
+  tableroId String      @map("tablero_id") @db.VarChar(36)
+  usuarioId String      @map("usuario_id") @db.VarChar(36)
+  rol       RolTablero  @default(MIEMBRO)
+  ingresoAt DateTime    @default(now()) @map("ingreso_at")
+  salidaAt  DateTime?   @map("salida_at")
+
+  tablero Tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([tableroId])
+  @@index([tableroId, salidaAt])
+  @@map("membresias")
 }

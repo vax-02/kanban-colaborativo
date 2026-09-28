@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { basicUser } from './serialize'
+import { emitToUsers } from './socket'
 
 export const userSelect = {
   id: true,
@@ -10,6 +11,7 @@ export const userSelect = {
   avatarColor: true,
   avatarUrl: true,
   esOnline: true,
+  ultimoVistoAt: true,
 } satisfies Prisma.UsuarioSelect
 
 export const taskDetailInclude = {
@@ -23,14 +25,20 @@ export const taskDetailInclude = {
 
 export type TaskDetailRow = Prisma.TareaGetPayload<{ include: typeof taskDetailInclude }>
 
-export function memberDto(m: {
-  usuario: Prisma.UsuarioGetPayload<{ select: typeof userSelect }>
-  rol?: string
-}) {
+export function memberDto(
+  m: {
+    usuario: Prisma.UsuarioGetPayload<{ select: typeof userSelect }>
+    rol?: string
+  },
+  info?: { ingresoAt?: string | null; invitadoAt?: string | null },
+) {
   return {
     ...basicUser(m.usuario),
     rol: m.rol ?? 'MIEMBRO',
     online: m.usuario.esOnline ?? false,
+    ultimoVistoAt: m.usuario.ultimoVistoAt?.toISOString() ?? null,
+    ingresoAt: info?.ingresoAt ?? null,
+    invitadoAt: info?.invitadoAt ?? null,
   }
 }
 
@@ -62,4 +70,13 @@ export async function isBoardMember(boardId: string, usuarioId: string) {
   return prisma.tableroMiembro.findUnique({
     where: { tableroId_usuarioId: { tableroId: boardId, usuarioId } },
   })
+}
+
+export async function notificarTareaCambiada(tableroId: string, usuarioId: string) {
+  const miembros = await prisma.tableroMiembro.findMany({
+    where: { tableroId },
+    select: { usuarioId: true },
+  })
+  const ids = [...new Set([...miembros.map((m) => m.usuarioId), usuarioId])]
+  await emitToUsers(ids, 'tarea:cambio', { tableroId })
 }
