@@ -6,6 +6,7 @@ import tasksRoutes from './modules/tasks/tasks.routes'
 import usersRoutes from './modules/users/users.routes'
 import invitacionesRoutes from './modules/invitaciones/invitaciones.routes'
 import chatRoutes from './modules/chat/chat.routes'
+import notificacionesRoutes from './modules/notificaciones/notificaciones.routes'
 import { config } from './config'
 
 export function createApp() {
@@ -29,6 +30,7 @@ export function createApp() {
   app.use('/api/users', usersRoutes)
   app.use('/api/invitaciones', invitacionesRoutes)
   app.use('/api/chat', chatRoutes)
+  app.use('/api/notificaciones', notificacionesRoutes)
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'Ruta no encontrada' })

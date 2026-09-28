@@ -38,6 +38,12 @@ enum EstadoInvitacion {
   RECHAZADA
 }
 
+enum TipoNotificacion {
+  INVITACION
+  INVITACION_ACEPTADA
+  INVITACION_RECHAZADA
+}
+
 model Usuario {
   id            String        @id @default(uuid()) @db.VarChar(36)
   nombre        String        @db.VarChar(100)
@@ -62,6 +68,7 @@ model Usuario {
   mensajes          Mensaje[]                  @relation("MensajeAutor")
   invitacionesEnviadas   Invitacion[]          @relation("InvitacionCreador")
   invitacionesRecibidas  Invitacion[]          @relation("InvitacionUsuario")
+  notificaciones         Notificacion[]
 
   @@map("usuarios")
 }
@@ -83,6 +90,7 @@ model Tablero {
   etiquetas Etiqueta[]
   favoritos FavoritoTablero[]
   invitaciones Invitacion[]
+  notificaciones Notificacion[]
 
   @@map("tableros")
 }
@@ -101,6 +109,7 @@ model Invitacion {
   tablero   Tablero  @relation(fields: [tableroId], references: [id], onDelete: Cascade)
   usuario   Usuario  @relation("InvitacionUsuario", fields: [usuarioId], references: [id], onDelete: Cascade)
   creadoPor Usuario  @relation("InvitacionCreador", fields: [creadoPorId], references: [id], onDelete: Cascade)
+  notificaciones Notificacion[]
 
   @@unique([tableroId, usuarioId])
   @@index([usuarioId, estado])
@@ -272,4 +281,25 @@ model Mensaje {
   @@index([conversacionId])
   @@index([autorId])
   @@map("mensajes")
+}
+
+model Notificacion {
+  id           String           @id @default(uuid()) @db.VarChar(36)
+  usuarioId    String           @map("usuario_id") @db.VarChar(36)
+  tipo         TipoNotificacion
+  titulo       String           @db.VarChar(255)
+  cuerpo       String?          @db.VarChar(500)
+  tableroId    String?          @map("tablero_id") @db.VarChar(36)
+  invitacionId String?          @map("invitacion_id") @db.VarChar(36)
+  leida        Boolean          @default(false)
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  usuario    Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  tablero    Tablero?   @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  invitacion Invitacion? @relation(fields: [invitacionId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, leida])
+  @@index([usuarioId])
+  @@index([tableroId])
+  @@map("notificaciones")
 }
