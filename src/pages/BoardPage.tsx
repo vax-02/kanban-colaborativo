@@ -1,9 +1,25 @@
-import { useEffect, useState } from 'react'
-import { KanbanSquare, LoaderCircle, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  KanbanSquare,
+  LoaderCircle,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import KanbanBoard from '../components/KanbanBoard'
+import Modal from '../components/Modal'
+import { useAuthStore } from '../store/authStore'
 import { useBoardsStore } from '../store/boardsStore'
+import { useFiltersStore } from '../store/filtersStore'
 import { useUiStore } from '../store/uiStore'
+import {
+  countActiveFilters,
+  filtersActive,
+  isDoneColumn,
+  taskMatchesFilters,
+} from '../lib/filters'
 import { formatDue, formatUpdated, shortName } from '../lib/format'
 import type { ColumnaDto, TaskDto, BoardDetailDto } from '../lib/types'
 import type { Column, Label, Person, Task } from '../data/mock'
@@ -34,13 +50,41 @@ function toColumn(c: ColumnaDto): Column {
   return { id: c.id, title: c.titulo, color: c.color, tasks: c.tareas.map(toTask) }
 }
 
+const COLUMN_COLORS = [
+  '#94a3b8',
+  '#6366f1',
+  '#8b5cf6',
+  '#ec4899',
+  '#ef4444',
+  '#f59e0b',
+  '#10b981',
+  '#0ea5e9',
+]
+
 function BoardLoader({ boardId }: { boardId: string }) {
   const getBoard = useBoardsStore((s) => s.getBoard)
   const taskV = useBoardsStore((s) => s.taskV)
   const membersV = useBoardsStore((s) => s.membersV)
   const openModal = useUiStore((s) => s.openModal)
+  const me = useAuthStore((s) => s.user)
+  const updateTask = useBoardsStore((s) => s.updateTask)
+  const bumpTask = useBoardsStore((s) => s.bumpTask)
+  const createColumn = useBoardsStore((s) => s.createColumn)
+  const updateColumn = useBoardsStore((s) => s.updateColumn)
+  const deleteColumn = useBoardsStore((s) => s.deleteColumn)
+  const reorderColumns = useBoardsStore((s) => s.reorderColumns)
+  const filterState = useFiltersStore((s) => s.filters)
   const [board, setBoard] = useState<BoardDetailDto | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [columnForm, setColumnForm] = useState({ open: false, titulo: '', color: '#94a3b8' })
+  const [deleteCol, setDeleteCol] = useState<{
+    id: string
+    titulo: string
+    tareas: number
+    destino: string
+  } | null>(null)
+  const [savingColumn, setSavingColumn] = useState(false)
+  const [columnError, setColumnError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -55,6 +99,16 @@ function BoardLoader({ boardId }: { boardId: string }) {
       active = false
     }
   }, [boardId, taskV, membersV, getBoard])
+
+  const visibleColumns = useMemo(() => {
+    if (!board || filterState.boardId !== board.id) return board?.columnas ?? []
+    return board.columnas
+      .filter((c) => filterState.showDone || !isDoneColumn(c.titulo))
+      .map((c) => ({
+        ...c,
+        tareas: c.tareas.filter((t) => taskMatchesFilters(t, filterState)),
+      }))
+  }, [board, filterState])
 
   if (error) {
     return (
@@ -80,6 +134,51 @@ function BoardLoader({ boardId }: { boardId: string }) {
         Cargando tablero…
       </div>
     )
+  }
+
+  const myMember = board.miembros.find((m) => m.id === me?.id)
+  const canEdit = myMember ? myMember.rol !== 'LECTURA' : false
+
+  const appliedFilters = filterState.boardId === board.id
+  const filterCount = appliedFilters ? countActiveFilters(filterState) : 0
+  const filtered = appliedFilters && filtersActive(filterState)
+
+  const handleMoveTask = async (
+    taskId: string,
+    fromColumnId: string,
+    toColumnId: string,
+    toIndex: number,
+  ) => {
+    const target = board.columnas.find((c) => c.id === toColumnId)
+    if (!target) return
+    const fullIds = target.tareas.map((t) => t.id)
+    const visible = target.tareas
+      .filter((t) => !filtered || taskMatchesFilters(t, filterState))
+      .map((t) => t.id)
+
+    let insertInFull: number
+    if (visible.length === 0 || toIndex <= 0) {
+      insertInFull = 0
+    } else {
+      const beforeId = visible[Math.min(toIndex, visible.length) - 1]
+      insertInFull = fullIds.indexOf(beforeId) + 1
+    }
+
+    const without = fullIds.filter((id) => id !== taskId)
+    const origIdx = fullIds.indexOf(taskId)
+    let insertAt = insertInFull
+    if (origIdx !== -1 && origIdx < insertAt) insertAt -= 1
+    insertAt = Math.max(0, Math.min(insertAt, without.length))
+    const next = [...without.slice(0, insertAt), taskId, ...without.slice(insertAt)]
+
+    if (fromColumnId === toColumnId && fullIds.join(',') === next.join(',')) return
+    try {
+      await updateTask(taskId, { columnaId: toColumnId, orden: next })
+    } catch {
+      /* si el servidor rechaza, se recarga el tablero para volver al estado real */
+    } finally {
+      bumpTask()
+    }
   }
 
   return (
@@ -116,6 +215,12 @@ function BoardLoader({ boardId }: { boardId: string }) {
             <Users className="h-3.5 w-3.5" />
             {board.miembros.length} miembros
           </button>
+          {filtered && (
+            <span className="flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-200">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              {filterCount} {filterCount === 1 ? 'filtro activo' : 'filtros activos'}
+            </span>
+          )}
           <span className="text-ink-400">
             {board.columnas.length} columnas · {formatUpdated(board.updatedAt)}
           </span>
@@ -123,14 +228,228 @@ function BoardLoader({ boardId }: { boardId: string }) {
       </div>
 
       <KanbanBoard
-        initialColumns={board.columnas.map(toColumn)}
+        initialColumns={visibleColumns.map(toColumn)}
+        canEdit={canEdit}
+        onMoveTask={handleMoveTask}
         onOpenTask={(taskId, columnId) =>
           openModal({ type: 'task', taskId, columnId, boardId: board.id })
         }
         onNewTask={(columnId) =>
           openModal({ type: 'task', taskId: '', columnId, boardId: board.id })
         }
+        onNewColumn={() => {
+          setColumnForm({ open: true, titulo: '', color: '#94a3b8' })
+          setColumnError(null)
+        }}
+        onRenameColumn={async (columnaId, titulo) => {
+          try {
+            await updateColumn(board.id, columnaId, { titulo })
+          } catch {
+            bumpTask()
+          }
+        }}
+        onDeleteColumn={(columnaId) => {
+          const target = board.columnas.find((c) => c.id === columnaId)
+          setDeleteCol({
+            id: columnaId,
+            titulo: target?.titulo ?? '',
+            tareas: target?.tareas.length ?? 0,
+            destino: '',
+          })
+          setColumnError(null)
+        }}
+        onReorderColumns={async (ids) => {
+          try {
+            await reorderColumns(board.id, ids)
+          } catch {
+            bumpTask()
+          }
+        }}
       />
+
+      {columnForm.open && (
+        <Modal
+          title="Nueva columna"
+          subtitle="Se añadirá al final del tablero."
+          icon={<Plus className="h-5 w-5" />}
+          onClose={() => setColumnForm((f) => ({ ...f, open: false }))}
+          footer={
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setColumnForm((f) => ({ ...f, open: false }))}
+                className="btn-ghost"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!columnForm.titulo.trim() || savingColumn}
+                onClick={async () => {
+                  setSavingColumn(true)
+                  setColumnError(null)
+                  try {
+                    await createColumn(
+                      board.id,
+                      columnForm.titulo.trim(),
+                      columnForm.color,
+                    )
+                    setColumnForm({ open: false, titulo: '', color: '#94a3b8' })
+                  } catch (e) {
+                    setColumnError(
+                      e instanceof Error ? e.message : 'No se pudo crear la columna',
+                    )
+                  } finally {
+                    setSavingColumn(false)
+                  }
+                }}
+                className="btn-primary"
+              >
+                {savingColumn ? 'Creando…' : 'Crear columna'}
+              </button>
+            </div>
+          }
+        >
+          {columnError && (
+            <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">
+              {columnError}
+            </p>
+          )}
+          <label className="mb-1.5 block text-xs font-bold text-ink-600">
+            Nombre de la columna
+          </label>
+          <input
+            autoFocus
+            value={columnForm.titulo}
+            onChange={(e) =>
+              setColumnForm((f) => ({ ...f, titulo: e.target.value }))
+            }
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !columnForm.titulo.trim()) return
+              e.preventDefault()
+              const run = async () => {
+                setSavingColumn(true)
+                setColumnError(null)
+                try {
+                  await createColumn(board.id, columnForm.titulo.trim(), columnForm.color)
+                  setColumnForm({ open: false, titulo: '', color: '#94a3b8' })
+                } catch (err) {
+                  setColumnError(
+                    err instanceof Error ? err.message : 'No se pudo crear la columna',
+                  )
+                } finally {
+                  setSavingColumn(false)
+                }
+              }
+              void run()
+            }}
+            maxLength={100}
+            placeholder="Ej. En espera, Revisión legal…"
+            className="input"
+          />
+          <p className="mt-4 mb-1.5 text-xs font-bold text-ink-600">Color</p>
+          <div className="flex flex-wrap gap-2">
+            {COLUMN_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setColumnForm((f) => ({ ...f, color: c }))}
+                aria-label={`Color ${c}`}
+                className={`h-7 w-7 cursor-pointer rounded-full ring-offset-2 transition ${
+                  columnForm.color === c
+                    ? 'ring-2 ring-ink-800'
+                    : 'ring-1 ring-ink-200 hover:scale-110'
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {deleteCol && (
+        <Modal
+          title="Eliminar columna"
+          subtitle={`«${deleteCol.titulo}» se quitará del tablero.`}
+          icon={<Trash2 className="h-5 w-5" />}
+          onClose={() => setDeleteCol(null)}
+          footer={
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setDeleteCol(null)} className="btn-ghost">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  savingColumn ||
+                  board.columnas.length <= 1 ||
+                  (deleteCol.tareas > 0 && !deleteCol.destino)
+                }
+                onClick={async () => {
+                  setSavingColumn(true)
+                  setColumnError(null)
+                  try {
+                    await deleteColumn(
+                      board.id,
+                      deleteCol.id,
+                      deleteCol.destino || undefined,
+                    )
+                    setDeleteCol(null)
+                  } catch (e) {
+                    setColumnError(
+                      e instanceof Error ? e.message : 'No se pudo eliminar la columna',
+                    )
+                  } finally {
+                    setSavingColumn(false)
+                  }
+                }}
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingColumn ? 'Eliminando…' : 'Eliminar columna'}
+              </button>
+            </div>
+          }
+        >
+          {columnError && (
+            <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">
+              {columnError}
+            </p>
+          )}
+          {board.columnas.length <= 1 ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+              El tablero debe tener al menos una columna, así que no se puede eliminar.
+            </p>
+          ) : deleteCol.tareas > 0 ? (
+            <>
+              <p className="mb-2 text-xs font-semibold text-ink-600">
+                Esta columna tiene {deleteCol.tareas}{' '}
+                {deleteCol.tareas === 1 ? 'tarea' : 'tareas'}. Elige a dónde moverlas
+                antes de eliminarla.
+              </p>
+              <select
+                value={deleteCol.destino}
+                onChange={(e) =>
+                  setDeleteCol((d) => (d ? { ...d, destino: e.target.value } : d))
+                }
+                className="input cursor-pointer"
+              >
+                <option value="">Selecciona la columna destino…</option>
+                {board.columnas
+                  .filter((c) => c.id !== deleteCol.id)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.titulo} ({c.tareas.length})
+                    </option>
+                  ))}
+              </select>
+            </>
+          ) : (
+            <p className="text-xs text-ink-500">
+              La columna está vacía, se eliminará sin más consecuencias.
+            </p>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }

@@ -22,6 +22,8 @@ type BoardsStore = {
   invites: InvitacionDto[]
   loadingInvites: boolean
   sentInvites: SentInviteDto[]
+  minePending: number
+  mineTotal: number
   loadBoards: () => Promise<void>
   createBoard: (input: CreateBoardInput) => Promise<BoardDto>
   updateBoard: (id: string, input: UpdateBoardInput) => Promise<BoardDto>
@@ -31,7 +33,16 @@ type BoardsStore = {
   createTask: (input: CreateTaskInput) => Promise<TaskDto>
   updateTask: (id: string, input: UpdateTaskInput) => Promise<TaskDto>
   deleteTask: (id: string) => Promise<void>
+  createColumn: (boardId: string, titulo: string, color?: string) => Promise<void>
+  updateColumn: (
+    boardId: string,
+    columnaId: string,
+    data: { titulo?: string; color?: string },
+  ) => Promise<void>
+  deleteColumn: (boardId: string, columnaId: string, moverA?: string) => Promise<void>
+  reorderColumns: (boardId: string, ids: string[]) => Promise<void>
   bumpTask: () => void
+  loadMine: () => Promise<void>
   addMember: (boardId: string, usuarioId: string, rol: RolTablero) => Promise<void>
   updateMemberRole: (boardId: string, usuarioId: string, rol: RolTablero) => Promise<void>
   removeMember: (boardId: string, usuarioId: string) => Promise<void>
@@ -43,6 +54,11 @@ type BoardsStore = {
     usuarioId: string,
     rol: RolTablero,
     email?: string,
+  ) => Promise<void>
+  updateInviteRole: (
+    boardId: string,
+    usuarioId: string,
+    rol: RolTablero,
   ) => Promise<void>
   acceptInvitation: (id: string) => Promise<void>
   rejectInvitation: (id: string) => Promise<void>
@@ -57,6 +73,8 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
   invites: [],
   loadingInvites: false,
   sentInvites: [],
+  minePending: 0,
+  mineTotal: 0,
 
   async loadBoards() {
     if (!getToken()) {
@@ -142,8 +160,54 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
     get().bumpTask()
   },
 
+  async createColumn(boardId, titulo, color) {
+    await api(`/boards/${boardId}/columnas`, {
+      method: 'POST',
+      body: JSON.stringify(color ? { titulo, color } : { titulo }),
+    })
+    get().bumpTask()
+  },
+
+  async updateColumn(boardId, columnaId, data) {
+    await api(`/boards/${boardId}/columnas/${columnaId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+    get().bumpTask()
+  },
+
+  async deleteColumn(boardId, columnaId, moverA) {
+    const q = moverA ? `?moverA=${encodeURIComponent(moverA)}` : ''
+    await api<void>(`/boards/${boardId}/columnas/${columnaId}${q}`, {
+      method: 'DELETE',
+    })
+    get().bumpTask()
+  },
+
+  async reorderColumns(boardId, ids) {
+    await api(`/boards/${boardId}/columnas/orden`, {
+      method: 'PUT',
+      body: JSON.stringify({ ids }),
+    })
+    get().bumpTask()
+  },
+
   bumpTask() {
     set({ taskV: get().taskV + 1 })
+    void get().loadMine()
+  },
+
+  async loadMine() {
+    if (!getToken()) {
+      set({ minePending: 0, mineTotal: 0 })
+      return
+    }
+    try {
+      const res = await api<{ total: number; pendientes: number }>('/tasks/mine')
+      set({ mineTotal: res.total, minePending: res.pendientes })
+    } catch {
+      /* mantiene el último valor conocido si el conteo falla */
+    }
   },
 
   async addMember(boardId, usuarioId, rol) {
@@ -170,6 +234,7 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
   bumpMembers() {
     set({ membersV: get().membersV + 1 })
     get().loadBoards()
+    void get().loadMine()
   },
 
   async loadInvitations() {
@@ -208,10 +273,17 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
     get().bumpMembers()
   },
 
+  async updateInviteRole(boardId, usuarioId, rol) {
+    await api(`/boards/${boardId}/invitaciones/${usuarioId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ rol }),
+    })
+  },
+
   async acceptInvitation(id) {
     await api<void>(`/invitaciones/${id}/aceptar`, { method: 'POST' })
     set({ invites: get().invites.filter((i) => i.id !== id) })
-    await get().loadBoards()
+    await Promise.all([get().loadBoards(), get().loadMine()])
   },
 
   async rejectInvitation(id) {

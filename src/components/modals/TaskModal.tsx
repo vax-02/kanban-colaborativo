@@ -69,6 +69,8 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
   const [etiquetasSel, setEtiquetasSel] = useState<{ texto: string; color: string }[]>([])
   const [nuevaEtiqueta, setNuevaEtiqueta] = useState('')
 
+  const [columnaSel, setColumnaSel] = useState(columnId)
+
   useEffect(() => {
     let active = true
 
@@ -111,8 +113,8 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
   }, [boardId, taskId, getBoard])
 
   const columna = useMemo(
-    () => board?.columnas.find((c) => c.id === columnId),
-    [board, columnId],
+    () => board?.columnas.find((c) => c.id === columnaSel),
+    [board, columnaSel],
   )
 
   const doneCount = checklist.filter((c) => c.hecho).length
@@ -165,6 +167,7 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
     try {
       if (taskId) {
         await updateTask(taskId, {
+          columnaId: columnaSel,
           titulo: titulo.trim(),
           descripcion: descripcion.trim() || null,
           prioridad,
@@ -360,6 +363,31 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
 
         {/* ==== Panel lateral ==== */}
         <div className="space-y-4">
+          <div>
+            <SectionLabel>Estado</SectionLabel>
+            <div className="space-y-1">
+              {board?.columnas.map((c) => {
+                const activa = c.id === columnaSel
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setColumnaSel(c.id)}
+                    className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+                      activa
+                        ? 'bg-ink-100 text-ink-900'
+                        : 'text-ink-500 hover:bg-ink-50 hover:text-ink-800'
+                    }`}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                    <span className="flex-1 truncate text-left">{c.titulo}</span>
+                    {activa && <Check className="h-3.5 w-3.5 text-brand-600" strokeWidth={3} />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div>
             <SectionLabel>Asignados</SectionLabel>
             <div className="space-y-1.5">

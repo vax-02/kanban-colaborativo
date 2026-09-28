@@ -3,7 +3,7 @@ import { Check, KanbanSquare, Lock, LockOpen, Palette, Plus } from 'lucide-react
 import { useNavigate } from 'react-router-dom'
 import Modal from '../Modal'
 import { useBoardsStore } from '../../store/boardsStore'
-import type { Plantilla, CreateBoardInput } from '../../lib/types'
+import type { CreateBoardInput } from '../../lib/types'
 
 type Props = { onClose: () => void }
 
@@ -18,20 +18,12 @@ const palette = [
   '#14b8a6',
 ]
 
-const templates: { icon: string; name: string; desc: string; value: Plantilla }[] = [
-  { icon: '📋', name: 'Proyecto', desc: 'Organiza entregas y objetivos', value: 'PROYECTO' },
-  { icon: '🎯', name: 'Sprint', desc: 'Planifica ciclos cortos', value: 'SPRINT' },
-  { icon: '🧰', name: 'Tareas', desc: 'Lista simple para el día a día', value: 'TAREAS' },
-  { icon: '🌐', name: 'En blanco', desc: 'Empieza desde cero', value: 'VACIO' },
-]
-
 export default function CreateBoardModal({ onClose }: Props) {
   const navigate = useNavigate()
   const createBoard = useBoardsStore((s) => s.createBoard)
   const [name, setName] = useState('')
   const [color, setColor] = useState(palette[0])
   const [privateB, setPrivateB] = useState(false)
-  const [plantilla, setPlantilla] = useState<Plantilla>('PROYECTO')
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,7 +34,6 @@ export default function CreateBoardModal({ onClose }: Props) {
       const input: CreateBoardInput = {
         nombre: name.trim(),
         color,
-        plantilla,
         esPrivado: privateB,
       }
       const board = await createBoard(input)
@@ -86,7 +77,7 @@ export default function CreateBoardModal({ onClose }: Props) {
   return (
     <Modal
       title="Crear tablero"
-      subtitle="Elige una plantilla y personaliza tu nuevo espacio de trabajo."
+      subtitle="Configura tu nuevo tablero kanban y empieza a organizar."
       icon={<KanbanSquare className="h-5 w-5" />}
       onClose={onClose}
       footer={
@@ -108,29 +99,6 @@ export default function CreateBoardModal({ onClose }: Props) {
         </>
       }
     >
-      {/* Plantillas */}
-      <p className="mb-2 text-xs font-bold tracking-wider text-ink-400 uppercase">
-        Plantillas
-      </p>
-      <div className="mb-5 grid grid-cols-4 gap-2">
-        {templates.map((t) => (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => setPlantilla(t.value)}
-            className={`cursor-pointer rounded-xl border p-3 text-left transition ${
-              plantilla === t.value
-                ? 'border-brand-400 bg-brand-50 ring-2 ring-brand-200'
-                : 'border-ink-200 bg-surface hover:border-brand-300 hover:bg-brand-50/50'
-            }`}
-          >
-            <span className="text-xl">{t.icon}</span>
-            <p className="mt-1.5 text-xs font-semibold text-ink-800">{t.name}</p>
-            <p className="text-[10px] leading-tight text-ink-400">{t.desc}</p>
-          </button>
-        ))}
-      </div>
-
       {/* Nombre */}
       <label className="mb-1.5 block text-sm font-medium text-ink-700">
         Nombre del tablero
