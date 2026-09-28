@@ -1,126 +1,201 @@
-import { useState } from 'react'
-import { CheckCircle2, CircleDot, Clock, MessageSquare, UserPlus } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import {
+  CheckCircle2,
+  Clock,
+  Flag,
+  LoaderCircle,
+  Trash2,
+  UserCheck,
+  UserMinus,
+  UserPlus,
+} from 'lucide-react'
 import Modal from '../Modal'
 import Avatar from '../Avatar'
+import { api } from '../../lib/api'
+import { useBoardsStore } from '../../store/boardsStore'
+import type { ActividadDto, TipoActividad } from '../../lib/types'
 
 type Props = { onClose: () => void }
 
-type Activity = {
-  id: string
-  kind: 'move' | 'create' | 'comment' | 'member' | 'done'
-  person: { name: string; initials: string; color: string }
-  text: string
-  time: string
+type Filtro =
+  | 'all'
+  | 'move'
+  | 'prio'
+  | 'create'
+  | 'member'
+
+const tipoFiltro: Record<Filtro, TipoActividad[]> = {
+  all: [],
+  move: ['TAREA_MOVIDA'],
+  prio: ['PRIORIDAD_CAMBIADA'],
+  create: ['TABLERO_CREADO', 'TAREA_CREADA', 'TAREA_ELIMINADA'],
+  member: ['MIEMBRO_INVITADO', 'MIEMBRO_UNIDO', 'MIEMBRO_REMOVIDO'],
 }
 
-const activities: Activity[] = [
-  { id: 'a1', kind: 'move', person: { name: 'Ana García', initials: 'AG', color: '#6366f1' }, text: 'movió «Implementar drag & drop» a En progreso', time: 'Hace 5 min' },
-  { id: 'a2', kind: 'comment', person: { name: 'María López', initials: 'ML', color: '#10b981' }, text: 'comentó en «Pruebas de carga en el servidor»', time: 'Hace 14 min' },
-  { id: 'a3', kind: 'member', person: { name: 'Laura Torres', initials: 'LT', color: '#8b5cf6' }, text: 'se unió al tablero «Design system»', time: 'Hace 32 min' },
-  { id: 'a4', kind: 'create', person: { name: 'Carlos Ruiz', initials: 'CR', color: '#f59e0b' }, text: 'creó la tarjeta «Revisar sprint backlog»', time: 'Hace 1 h' },
-  { id: 'a5', kind: 'done', person: { name: 'Pedro Sánchez', initials: 'PS', color: '#ef4444' }, text: 'completó «Configurar CI/CD en GitHub Actions»', time: 'Hace 2 h' },
-  { id: 'a6', kind: 'move', person: { name: 'Ana García', initials: 'AG', color: '#6366f1' }, text: 'movió «Auditoría de accesibilidad» a Terminado', time: 'Hace 3 h' },
+function iconoTipo(tipo: TipoActividad) {
+  switch (tipo) {
+    case 'TABLERO_CREADO':
+    case 'TAREA_CREADA':
+      return { Icon: Clock, color: '#6366f1' }
+    case 'TAREA_MOVIDA':
+      return { Icon: CheckCircle2, color: '#f59e0b' }
+    case 'TAREA_ELIMINADA':
+      return { Icon: Trash2, color: '#ef4444' }
+    case 'PRIORIDAD_CAMBIADA':
+      return { Icon: Flag, color: '#8b5cf6' }
+    case 'MIEMBRO_INVITADO':
+      return { Icon: UserPlus, color: '#0ea5e9' }
+    case 'MIEMBRO_UNIDO':
+      return { Icon: UserCheck, color: '#10b981' }
+    case 'MIEMBRO_REMOVIDO':
+      return { Icon: UserMinus, color: '#ef4444' }
+  }
+}
+
+function marcaTiempo(iso: string) {
+  const fecha = new Date(iso)
+  const diffMs = Date.now() - fecha.getTime()
+  const min = Math.floor(diffMs / 60000)
+  if (min < 1) return 'Ahora mismo'
+  if (min < 60) return `Hace ${min} min`
+  const hrs = Math.floor(min / 60)
+  if (hrs < 24) return `Hace ${hrs} h`
+  const dias = Math.floor(hrs / 24)
+  if (dias < 7) return `Hace ${dias} día${dias === 1 ? '' : 's'}`
+  return fecha.toLocaleDateString('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+const filtros: { value: Filtro; label: string }[] = [
+  { value: 'all', label: 'Todo' },
+  { value: 'move', label: 'Movimientos' },
+  { value: 'prio', label: 'Prioridad' },
+  { value: 'create', label: 'Creaciones' },
+  { value: 'member', label: 'Miembros' },
 ]
 
-const typeMeta = {
-  move: { Icon: CircleDot, color: '#f59e0b' },
-  create: { Icon: Clock, color: '#6366f1' },
-  comment: { Icon: MessageSquare, color: '#0ea5e9' },
-  member: { Icon: UserPlus, color: '#8b5cf6' },
-  done: { Icon: CheckCircle2, color: '#10b981' },
-} as const
-
-type Filter = 'all' | 'move' | 'create' | 'comment' | 'member' | 'done'
-
 export default function ActivityModal({ onClose }: Props) {
-  const [filter, setFilter] = useState<Filter>('all')
+  const { boardId } = useParams()
+  const boards = useBoardsStore((s) => s.boards)
+  const [filter, setFilter] = useState<Filtro>('all')
+  const [activities, setActivities] = useState<ActividadDto[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const list = filter === 'all' ? activities : activities.filter((a) => a.kind === filter)
+  useEffect(() => {
+    if (!boardId) return
+    let active = true
+    api<{ actividades: ActividadDto[] }>(`/boards/${boardId}/actividades`)
+      .then((res) => {
+        if (active) setActivities(res.actividades)
+      })
+      .catch(() => {
+        if (active) setError('No se pudo cargar la actividad del tablero.')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [boardId])
+
+  const boardName = boards.find((b) => b.id === boardId)?.nombre
+
+  const list = useMemo(() => {
+    if (filter === 'all') return activities
+    const tipos = new Set(tipoFiltro[filter])
+    return activities.filter((a) => tipos.has(a.tipo))
+  }, [activities, filter])
 
   return (
     <Modal
       title="Actividad reciente"
-      subtitle="Cambios registrados en «App móvil» y tableros del equipo."
+      subtitle={
+        boardName
+          ? `Cambios registrados en «${boardName}».`
+          : 'Cambios registrados en este tablero.'
+      }
       icon={<Clock className="h-5 w-5" />}
       onClose={onClose}
       maxWidth="max-w-lg"
-      footer={
-        <p className="w-full text-center text-xs text-ink-400">
-          ¿Quieres exportar el historial completo?
-          <button
-            type="button"
-            className="ml-1 cursor-pointer font-semibold text-brand-600 hover:text-brand-700"
-          >
-            Seguir al historial
-          </button>
-        </p>
-      }
     >
       {/* Filtros rápidos */}
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {(
-          [
-            ['all', 'Todo'],
-            ['move', 'Movimientos'],
-            ['comment', 'Comentarios'],
-            ['create', 'Creaciones'],
-            ['member', 'Miembros'],
-            ['done', 'Completadas'],
-          ] as [Filter, string][]
-        ).map(([key, label]) => (
+        {filtros.map((f) => (
           <button
-            key={key}
+            key={f.value}
             type="button"
-            onClick={() => setFilter(key)}
+            onClick={() => setFilter(f.value)}
             className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              filter === key
+              filter === f.value
                 ? 'bg-ink-900 text-ink-50'
                 : 'bg-ink-100 text-ink-600 hover:bg-ink-200'
             }`}
           >
-            {label}
+            {f.label}
           </button>
         ))}
       </div>
 
-      {/* Línea de tiempo */}
-      <ol className="relative space-y-5 pl-2">
-        <span className="absolute top-1 left-[26px] h-[calc(100%-1rem)] w-px bg-ink-200" />
-        {list.map((a) => {
-          const meta = typeMeta[a.kind]
-          return (
-            <li key={a.id} className="relative flex items-start gap-3">
-              <span
-                className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-50 ring-1"
-                style={{ color: meta.color, borderColor: meta.color }}
-              >
-                <meta.Icon className="h-4 w-4" />
-              </span>
-              <div className="min-w-0 flex-1 pb-1">
-                <div className="flex items-center gap-2.5">
-                  <Avatar
-                    initials={a.person.initials}
-                    color={a.person.color}
-                    name={a.person.name}
-                    size="xs"
-                    className="scale-90"
-                  />
-                  <p className="text-sm text-ink-700">
-                    <span className="font-semibold text-ink-900">{a.person.name}</span>{' '}
-                    {a.text}
-                  </p>
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-sm text-ink-400">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+          Cargando actividad…
+        </div>
+      ) : error ? (
+        <p className="rounded-lg bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-600">
+          {error}
+        </p>
+      ) : list.length === 0 ? (
+        <p className="py-10 text-center text-sm text-ink-400">
+          No hay actividad de este tipo todavía.
+        </p>
+      ) : (
+        <ol className="relative space-y-5 pl-2">
+          <span className="absolute top-1 left-[26px] h-[calc(100%-1rem)] w-px bg-ink-200" />
+          {list.map((a) => {
+            const meta = iconoTipo(a.tipo)
+            const persona = a.autor ?? a.usuario
+            return (
+              <li key={a.id} className="relative flex items-start gap-3">
+                <span
+                  className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-50 ring-1"
+                  style={{ color: meta.color, borderColor: meta.color }}
+                >
+                  <meta.Icon className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1 pb-1">
+                  {persona ? (
+                    <div className="flex items-center gap-2.5">
+                      <Avatar
+                        initials={persona.iniciales}
+                        color={persona.avatarColor}
+                        name={`${persona.nombre} ${persona.apellidos}`}
+                        size="xs"
+                        className="scale-90"
+                      />
+                      <p className="text-sm text-ink-700">
+                        <span className="font-semibold text-ink-900">
+                          {persona.nombre} {persona.apellidos}
+                        </span>{' '}
+                        {a.detalle}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-ink-700">{a.detalle}</p>
+                  )}
+                  <p className="mt-1 pl-11 text-xs text-ink-400">{marcaTiempo(a.createdAt)}</p>
                 </div>
-                <p className="mt-1 pl-11 text-xs text-ink-400">{a.time}</p>
-              </div>
-            </li>
-          )
-        })}
-        {list.length === 0 && (
-          <li className="py-8 text-center text-sm text-ink-400">
-            No hay actividad de este tipo todavía.
-          </li>
-        )}
-      </ol>
+              </li>
+            )
+          })}
+        </ol>
+      )}
     </Modal>
   )
 }
