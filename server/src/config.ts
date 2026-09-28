@@ -11,6 +11,8 @@ export const config = {
   jwtSecret: required('JWT_SECRET'),
   clientOrigin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
   databaseUrl: required('DATABASE_URL'),
+  googleClientId: required('GOOGLE_CLIENT_ID'),
+  googleClientSecret: required('GOOGLE_CLIENT_SECRET'),
 }
 
 export const JWT_EXPIRES_IN = '7d'

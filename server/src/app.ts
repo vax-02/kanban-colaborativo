@@ -8,6 +8,8 @@ import invitacionesRoutes from './modules/invitaciones/invitaciones.routes'
 import chatRoutes from './modules/chat/chat.routes'
 import notificacionesRoutes from './modules/notificaciones/notificaciones.routes'
 import { config } from './config'
+import initializePassport from './modules/auth/passport'
+import passport from 'passport'
 
 export function createApp() {
   const app = express()
@@ -19,6 +21,9 @@ export function createApp() {
     }),
   )
   app.use(express.json())
+
+  // Inicializar Passport (usamos sesión falsa, solo para el flujo de OAuth)
+  app.use(passport.initialize())
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', ts: new Date().toISOString() })

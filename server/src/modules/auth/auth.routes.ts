@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
+import passport from 'passport'
 import { Router, type Request, type Response } from 'express'
 import { prisma } from '../../lib/prisma'
 import { signToken } from '../../lib/jwt'
@@ -144,5 +145,48 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   }
   res.json({ user: safeUser(user) })
 })
+
+router.get('/google', passport.authenticate('google', { session: false, scope: ['profile', 'email'] }))
+
+router.get(
+  '/google/callback',
+  passport.authenticate('google', { session: false }),
+  async (req: Request, res: Response) => {
+    const profile = req.user as any
+    const { emails, photos, displayName } = profile
+    const email = emails?.[0]?.value
+    const name = displayName
+    const picture = photos?.[0]?.value
+
+    if (!email) {
+      return res.status(400).json({ error: 'No se pudo obtener el email de Google' })
+    }
+
+    // Buscar usuario existente por email
+    const user = await prisma.usuario.findUnique({ where: { email } })
+
+    if (user) {
+      // Ya existe, iniciar sesión
+      const token = signToken(user)
+      res.redirect(`/?token=${token}`)
+    } else {
+      // Crear nuevo usuario con datos de Google
+      const seed = [...email].reduce((acc, c) => acc + c.charCodeAt(0), 0)
+      const passwordHash = await bcrypt.hash('temp12345', 10)
+      const nuevoUser = await prisma.usuario.create({
+        data: {
+          id: randomUUID(),
+          nombre: name ?? 'Usuario Google',
+          apellidos: '',
+          email,
+          passwordHash,
+          avatarColor: AVATAR_COLORS[seed % AVATAR_COLORS.length],
+        },
+      })
+      const token = signToken(nuevoUser)
+      res.redirect(`/?token=${token}`)
+    }
+  }
+)
 
 export default router
