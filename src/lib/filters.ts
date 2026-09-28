@@ -43,8 +43,8 @@ export function taskMatchesFilters(t: TaskDto, f: TaskFilters): boolean {
   return true
 }
 
-export function isDoneColumn(titulo: string): boolean {
-  return titulo.toLowerCase().includes('termin')
+export function isDoneColumn(columna: { esFinalizada: boolean }): boolean {
+  return columna.esFinalizada
 }
 
 export function countActiveFilters(f: TaskFilters): number {

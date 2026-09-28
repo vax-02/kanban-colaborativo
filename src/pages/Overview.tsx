@@ -74,7 +74,7 @@ export default function Overview() {
     for (const d of details) {
       for (const c of d.columnas) {
         for (const t of c.tareas) {
-          const terminada = c.titulo.toUpperCase() === 'TERMINADO'
+          const terminada = c.esFinalizada
           out.push({
             id: t.id,
             titulo: t.titulo,

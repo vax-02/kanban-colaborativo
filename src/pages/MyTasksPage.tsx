@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  CalendarDays,
   Check,
   ChevronRight,
+  Clock,
   Flag,
   ListTodo,
   LoaderCircle,
@@ -55,6 +57,19 @@ function formatDue(iso: string | null): string {
   return due.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
+function dueInfo(iso: string | null, done: boolean) {
+  if (!iso || done) return { label: `Vence ${formatDue(iso)}`, color: '#94a3b8', bold: false }
+  const target = new Date(iso)
+  target.setHours(0, 0, 0, 0)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const diff = Math.round((target.getTime() - today.getTime()) / 86400000)
+  if (diff < 0) return { label: `Vencida · ${formatDue(iso)}`, color: '#ef4444', bold: true }
+  if (diff === 0) return { label: 'Vence hoy', color: '#ef4444', bold: true }
+  if (diff <= 7) return { label: `Vence ${formatDue(iso)}`, color: '#f59e0b', bold: true }
+  return { label: `Vence ${formatDue(iso)}`, color: '#94a3b8', bold: false }
+}
+
 export default function MyTasksPage() {
   const [tab, setTab] = useState<Tab>('pendientes')
   const [query, setQuery] = useState('')
@@ -82,6 +97,7 @@ export default function MyTasksPage() {
 
         const collected: MyRow[] = []
         for (const b of details) {
+          if (b.archivado) continue
           for (const col of b.columnas) {
             for (const task of col.tareas) {
               const assigned = me
@@ -95,7 +111,7 @@ export default function MyTasksPage() {
                 boardColor: b.color,
                 columnId: col.id,
                 column: col.titulo,
-                done: col.titulo.toUpperCase() === 'TERMINADO',
+                done: col.esFinalizada,
               })
             }
           }
@@ -134,6 +150,21 @@ export default function MyTasksPage() {
 
   const pendingCount = rows.filter((r) => !r.done).length
 
+  const hoyBase = new Date()
+  hoyBase.setHours(0, 0, 0, 0)
+  const pendientes = rows.filter((r) => !r.done)
+  const diasHasta = (iso: string) =>
+    (new Date(iso).setHours(0, 0, 0, 0) - hoyBase.getTime()) / 86400000
+  const atrasadas = pendientes.filter(
+    (r) => r.task.fechaVencimiento && diasHasta(r.task.fechaVencimiento) < 0,
+  ).length
+  const porVencer = pendientes.filter(
+    (r) =>
+      r.task.fechaVencimiento &&
+      diasHasta(r.task.fechaVencimiento) >= 0 &&
+      diasHasta(r.task.fechaVencimiento) <= 7,
+  ).length
+
   const openDetail = (r: MyRow) =>
     openModal({ type: 'task', taskId: r.task.id, columnId: r.columnId, boardId: r.boardId })
 
@@ -146,6 +177,22 @@ export default function MyTasksPage() {
           <p className="mt-1 text-sm text-ink-500">
             {pendingCount} tareas pendientes en todos los tableros.
           </p>
+          {(atrasadas > 0 || porVencer > 0) && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {atrasadas > 0 && (
+                <span className="flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-600 ring-1 ring-rose-200">
+                  <Clock className="h-3.5 w-3.5" />
+                  {atrasadas} atrasada{atrasadas === 1 ? '' : 's'}
+                </span>
+              )}
+              {porVencer > 0 && (
+                <span className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-600 ring-1 ring-amber-200">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  {porVencer} vencen esta semana
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-ink-400" />
@@ -263,13 +310,12 @@ export default function MyTasksPage() {
                             {priorityLabel[r.task.prioridad]}
                           </span>
                           <span
-                            className={
-                              formatDue(r.task.fechaVencimiento) === 'Hoy'
-                                ? 'font-bold text-rose-600'
-                                : ''
-                            }
+                            className={`flex items-center gap-1 ${
+                              dueInfo(r.task.fechaVencimiento, r.done).bold ? 'font-bold' : ''
+                            }`}
+                            style={{ color: dueInfo(r.task.fechaVencimiento, r.done).color }}
                           >
-                            Vence {formatDue(r.task.fechaVencimiento)}
+                            {dueInfo(r.task.fechaVencimiento, r.done).label}
                           </span>
                         </div>
                       </button>

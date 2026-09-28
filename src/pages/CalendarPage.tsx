@@ -148,11 +148,14 @@ export default function CalendarPage() {
     if (!found) throw new Error('Tarea no encontrada')
 
     const board = await getBoard(found.boardId)
-    const doneCol = board.columnas.find(
-      (c) => c.titulo.toUpperCase() === 'TERMINADO',
-    )
+    const doneCol = board.columnas.find((c) => c.esFinalizada)
+    if (!doneCol) {
+      throw new Error(
+        'Este tablero no tiene ninguna columna marcada como de cierre. Marcá una con el icono de check verde en su cabecera.',
+      )
+    }
     await useBoardsStore.getState().updateTask(task.id, {
-      columnaId: doneCol?.id,
+      columnaId: doneCol.id,
       fechaVencimiento: null,
     })
 

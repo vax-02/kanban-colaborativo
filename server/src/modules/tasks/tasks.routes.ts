@@ -7,8 +7,10 @@ import {
   serializeTaskDetail,
   taskDetailInclude,
 } from '../../lib/tasks'
+import { crearNotificacion } from '../../lib/notificaciones'
 import { requireAuth, type AuthedRequest } from '../../middleware/auth'
 import { registrarActividad } from '../../lib/actividades'
+import { userSelect } from '../../lib/tasks'
 
 const router = Router()
 router.use(requireAuth)
@@ -56,6 +58,10 @@ const updateTaskSchema = z.object({
       }),
     )
     .optional(),
+})
+
+const comentarioSchema = z.object({
+  texto: z.string().trim().min(1, 'El comentario no puede estar vacío').max(2000),
 })
 
 async function taskWithBoard(id: string) {
@@ -158,6 +164,17 @@ router.post('/', async (req: Request, res: Response) => {
     tareaId: id,
     detalle: `Creó la tarjeta «${titulo}» en ${columna.titulo}`,
   })
+  const nuevosAsignados = [...new Set(asignados)].filter((u) => u !== userId)
+  for (const usuarioId of nuevosAsignados) {
+    await crearNotificacion({
+      usuarioId,
+      tipo: 'TAREA_ASIGNADA',
+      titulo: 'Te asignaron una tarjeta',
+      cuerpo: titulo,
+      tableroId: columna.tableroId,
+      tareaId: id,
+    }).catch(() => undefined)
+  }
   res.status(201).json({ task: task ? serializeTaskDetail(task) : null })
 })
 
@@ -166,12 +183,12 @@ router.get('/mine', async (req: Request, res: Response) => {
   const { userId } = req as AuthedRequest
   const asignaciones = await prisma.tareaAsignacion.findMany({
     where: { usuarioId: userId },
-    select: { tarea: { select: { columna: { select: { titulo: true } } } } },
+    select: {
+      tarea: { select: { columna: { select: { esFinalizada: true } } } },
+    },
   })
   const total = asignaciones.length
-  const pendientes = asignaciones.filter(
-    (a) => a.tarea.columna.titulo.toUpperCase() !== 'TERMINADO',
-  ).length
+  const pendientes = asignaciones.filter((a) => !a.tarea.columna.esFinalizada).length
   res.json({ total, pendientes })
 })
 
@@ -193,6 +210,77 @@ router.get('/:id', async (req: Request, res: Response) => {
   res.json({ task: task ? serializeTaskDetail(task) : null })
 })
 
+// POST /api/tasks/:id/comentarios — comentar y notificar menciones (@Nombre Apellido)
+router.post('/:id/comentarios', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const found = await taskWithBoard(id)
+  if (!found) {
+    res.status(404).json({ error: 'Tarea no encontrada' })
+    return
+  }
+  const member = await isBoardMember(found.columna.tableroId, userId)
+  if (!member || member.rol === 'LECTURA') {
+    res.status(403).json({ error: 'Tu rol no permite comentar' })
+    return
+  }
+
+  const parsed = comentarioSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
+    return
+  }
+
+  const comentario = await prisma.comentario.create({
+    data: { tareaId: id, autorId: userId, texto: parsed.data.texto },
+    include: { autor: { select: userSelect } },
+  })
+
+  const tableroId = found.columna.tableroId
+  const miembros = await prisma.tableroMiembro.findMany({
+    where: { tableroId },
+    include: { usuario: { select: userSelect } },
+  })
+  const texto = parsed.data.texto
+  const lower = texto.toLowerCase()
+  const mencionados = new Set<string>()
+  for (const m of miembros) {
+    const completo = `${m.usuario.nombre} ${m.usuario.apellidos}`.toLowerCase()
+    if (m.usuario.id === userId) continue
+    if (lower.includes(`@${completo}`) || lower.includes(`@${m.usuario.nombre.toLowerCase()}`)) {
+      mencionados.add(m.usuario.id)
+    }
+  }
+  for (const usuarioId of mencionados) {
+    await crearNotificacion({
+      usuarioId,
+      tipo: 'TAREA_MENCION',
+      titulo: 'Te mencionaron en una tarjeta',
+      cuerpo: `«${found.titulo}»: ${texto.slice(0, 90)}${texto.length > 90 ? '…' : ''}`,
+      tableroId,
+      tareaId: id,
+    }).catch(() => undefined)
+  }
+
+  await notificarTareaCambiada(tableroId, userId)
+  res.status(201).json({
+    comentario: {
+      id: comentario.id,
+      texto: comentario.texto,
+      createdAt: comentario.createdAt.toISOString(),
+      autor: {
+        id: comentario.autor.id,
+        nombre: comentario.autor.nombre,
+        apellidos: comentario.autor.apellidos,
+        email: comentario.autor.email,
+        avatarColor: comentario.autor.avatarColor,
+        avatarUrl: comentario.autor.avatarUrl,
+        iniciales: `${comentario.autor.nombre[0]}${comentario.autor.apellidos[0]}`.toUpperCase(),
+      },
+    },
+  })
+})
+
 // PUT /api/tasks/:id — actualizar tarjeta (contenido, columna, etiquetas, asignados, checklist)
 router.put('/:id', async (req: Request, res: Response) => {
   const { userId } = req as AuthedRequest
@@ -207,6 +295,12 @@ router.put('/:id', async (req: Request, res: Response) => {
     res.status(403).json({ error: 'Tu rol no permite editar esta tarjeta' })
     return
   }
+
+  const prevAsignados = await prisma.tareaAsignacion.findMany({
+    where: { tareaId: id },
+    select: { usuarioId: true },
+  })
+  const prevSet = new Set(prevAsignados.map((a) => a.usuarioId))
 
   const parsed = updateTaskSchema.safeParse(req.body)
   if (!parsed.success) {
@@ -307,6 +401,33 @@ router.put('/:id', async (req: Request, res: Response) => {
 
   const task = await getTaskDetail(id)
   await notificarTareaCambiada(tableroId, userId)
+
+  const finalAsignados =
+    asignados !== undefined ? [...new Set(asignados)] : [...prevSet]
+  for (const usuarioId of finalAsignados) {
+    if (usuarioId === userId || prevSet.has(usuarioId)) continue
+    await crearNotificacion({
+      usuarioId,
+      tipo: 'TAREA_ASIGNADA',
+      titulo: 'Te asignaron una tarjeta',
+      cuerpo: found.titulo,
+      tableroId,
+      tareaId: id,
+    }).catch(() => undefined)
+  }
+  if (tituloDestino) {
+    for (const usuarioId of finalAsignados) {
+      if (usuarioId === userId) continue
+      await crearNotificacion({
+        usuarioId,
+        tipo: 'TAREA_MOVIDA',
+        titulo: 'Mueven una tarjeta que sigues',
+        cuerpo: `«${found.titulo}» → ${tituloDestino}`,
+        tableroId,
+        tareaId: id,
+      }).catch(() => undefined)
+    }
+  }
 
   if (prioridadSel !== undefined && prioridadSel !== found.prioridad) {
     await registrarActividad({

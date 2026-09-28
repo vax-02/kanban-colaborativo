@@ -151,6 +151,7 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
           color: b.color,
           plantilla: b.plantilla,
           esPrivado: b.esPrivado,
+          archivado: b.archivado,
           esFavorito: b.esFavorito,
           tareas: 0,
           done: 0,

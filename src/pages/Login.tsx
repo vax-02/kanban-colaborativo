@@ -2,14 +2,10 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
-  CheckCircle2,
   KanbanSquare,
   Mail,
   Lock,
-  Users,
   Sparkles,
-  Globe,
-  Zap,
   Eye,
   EyeOff,
   LoaderCircle,
@@ -51,7 +47,7 @@ export default function Login() {
   return (
     <div className="flex min-h-screen bg-surface">
       {/* ==== Panel de marca ==== */}
-      <aside className="relative hidden w-[46%] overflow-hidden bg-gradient-to-br from-brand-700 via-brand-600 to-violet-600 lg:flex lg:flex-col lg:justify-between">
+      <aside className="relative hidden w-[46%] overflow-hidden bg-gradient-to-br from-brand-700 via-brand-600 to-violet-600 lg:flex lg:flex-col lg:justify-center">
         <div className="pointer-events-none absolute -top-24 -left-24 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-violet-300/20 blur-3xl" />
 
@@ -80,31 +76,6 @@ export default function Login() {
             Arrastra tareas, asigna responsables y comparte tu tablero con
             quién quieras. Todo sincronizado al instante.
           </p>
-
-          <ul className="mt-8 space-y-4">
-            {[
-              'Tableros Kanban ilimitados',
-              'Colaboración en vivo con tu equipo',
-              'Sin limites de miembros',
-            ].map((f) => (
-              <li key={f} className="flex items-center gap-3 text-sm text-white">
-                <CheckCircle2 className="h-5 w-5 text-emerald-300" />
-                {f}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="relative z-10 flex items-center gap-8 p-10 text-xs text-brand-100">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4" /> +12k equipos
-          </div>
-          <div className="flex items-center gap-2">
-            <Globe className="h-4 w-4" /> Disponible en español
-          </div>
-          <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4" /> Gratis para empezar
-          </div>
         </div>
       </aside>
 
@@ -124,11 +95,7 @@ export default function Login() {
             <h2 className="text-2xl font-bold tracking-tight text-ink-900">
               {mode === 'login' ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}
             </h2>
-            <p className="mt-1.5 text-sm text-ink-500">
-              {mode === 'login'
-                ? 'Inicia sesión para ver tus tableros.'
-                : 'Empieza a organizar tu trabajo en minutos.'}
-            </p>
+            
           </div>
 
           {/* Tabs */}
@@ -166,7 +133,6 @@ export default function Login() {
                   </label>
                   <input
                     type="text"
-                    placeholder="Ana"
                     className="input"
                     required
                     minLength={2}
@@ -180,7 +146,6 @@ export default function Login() {
                   </label>
                   <input
                     type="text"
-                    placeholder="García"
                     className="input"
                     required
                     minLength={2}

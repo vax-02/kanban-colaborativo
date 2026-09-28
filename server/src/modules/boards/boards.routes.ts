@@ -56,9 +56,15 @@ const columnaSchema = z.object({
     .trim()
     .regex(/^#[0-9a-fA-F]{6}$/, 'El color debe ser un hexadecimal de 6 dígitos')
     .optional(),
+  esFinalizada: z.boolean().optional(),
 })
 
 const ordenColumnasSchema = z.object({ ids: z.array(z.string()).min(1) })
+const etiquetaSchema = z.object({
+  texto: z.string().trim().min(1, 'El texto de la etiqueta es obligatorio').max(50),
+  color: hexColor,
+})
+const archivadoSchema = z.object({ archivado: z.boolean() })
 const sendInviteSchema = z.object({
   usuarioId: z.string().min(1).optional(),
   email: z.string().email().optional(),
@@ -121,7 +127,7 @@ type BoardDetailRow = Prisma.TableroGetPayload<{ include: typeof boardDetailIncl
 function serializeBoardList(b: BoardListRow, usuarioId: string) {
   const tareas = b.columnas.reduce((acc, c) => acc + c._count.tareas, 0)
   const done = b.columnas
-    .filter((c) => c.titulo.toUpperCase() === 'TERMINADO')
+    .filter((c) => c.esFinalizada)
     .reduce((acc, c) => acc + c._count.tareas, 0)
 
   return {
@@ -131,6 +137,7 @@ function serializeBoardList(b: BoardListRow, usuarioId: string) {
     color: b.color,
     plantilla: b.plantilla,
     esPrivado: b.esPrivado,
+    archivado: b.archivado,
     esFavorito: b.favoritos.some((f) => f.usuarioId === usuarioId),
     tareas,
     done,
@@ -177,6 +184,7 @@ function serializeBoardDetail(
     color: b.color,
     plantilla: b.plantilla,
     esPrivado: b.esPrivado,
+    archivado: b.archivado,
     esFavorito: b.favoritos.some((f) => f.usuarioId === usuarioId),
     updatedAt: b.updatedAt.toISOString(),
     creadoPor: basicUser(b.creadoPor),
@@ -203,6 +211,7 @@ function serializeBoardDetail(
       titulo: c.titulo,
       color: c.color,
       posicion: c.posicion,
+      esFinalizada: c.esFinalizada,
       tareas: c.tareas.map(serializeTaskDetail),
     })),
     historialMiembros: historial.map((m) => ({
@@ -338,6 +347,7 @@ router.post('/:id/columnas', async (req: Request, res: Response) => {
       titulo: parsed.data.titulo,
       color: parsed.data.color ?? '#94a3b8',
       posicion: (ultima?.posicion ?? -1) + 1,
+      esFinalizada: parsed.data.esFinalizada ?? false,
     },
   })
   await notificarColumnasCambiadas(id, userId)
@@ -402,8 +412,12 @@ router.put('/:id/columnas/:columnaId', async (req: Request, res: Response) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
     return
   }
-  if (parsed.data.titulo === undefined && parsed.data.color === undefined) {
-    res.status(400).json({ error: 'Envía al menos el título o el color' })
+  if (
+    parsed.data.titulo === undefined &&
+    parsed.data.color === undefined &&
+    parsed.data.esFinalizada === undefined
+  ) {
+    res.status(400).json({ error: 'Envía al menos el título, el color o el estado' })
     return
   }
 
@@ -412,6 +426,9 @@ router.put('/:id/columnas/:columnaId', async (req: Request, res: Response) => {
     data: {
       ...(parsed.data.titulo !== undefined ? { titulo: parsed.data.titulo } : {}),
       ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
+      ...(parsed.data.esFinalizada !== undefined
+        ? { esFinalizada: parsed.data.esFinalizada }
+        : {}),
     },
   })
   await notificarColumnasCambiadas(id, userId)
@@ -910,6 +927,115 @@ router.delete(
     res.status(204).end()
   },
 )
+
+// PUT /api/boards/:id/archivado — archivar o restaurar un tablero
+router.put('/:id/archivado', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const admin = await requireAdmin(res, id, userId)
+  if (!admin) return
+
+  const parsed = archivadoSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
+    return
+  }
+
+  const tablero = await prisma.tablero.update({
+    where: { id },
+    data: { archivado: parsed.data.archivado },
+  })
+
+  const archivosMiembros = await prisma.tableroMiembro.findMany({
+    where: { tableroId: id },
+    select: { usuarioId: true },
+  })
+  await notificarColumnasCambiadas(id, userId)
+  await emitToUsers(
+    archivosMiembros.map((m) => m.usuarioId),
+    'tablero:cambio',
+    { tableroId: id },
+  )
+  res.json({ board: { id, archivado: tablero.archivado } })
+})
+
+// POST /api/boards/:id/etiquetas — crear (o reusar) una etiqueta del tablero
+router.post('/:id/etiquetas', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const parsed = etiquetaSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
+    return
+  }
+
+  const etiqueta = await prisma.etiqueta.upsert({
+    where: { tableroId_texto: { tableroId: id, texto: parsed.data.texto } },
+    create: { tableroId: id, texto: parsed.data.texto, color: parsed.data.color },
+    update: { color: parsed.data.color },
+  })
+
+  await notificarColumnasCambiadas(id, userId)
+  res.status(201).json({ etiqueta })
+})
+
+// PUT /api/boards/:id/etiquetas/:etiquetaId — renombrar o recolorear una etiqueta
+router.put('/:id/etiquetas/:etiquetaId', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const etiquetaId = String(req.params.etiquetaId)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const found = await prisma.etiqueta.findFirst({ where: { id: etiquetaId, tableroId: id } })
+  if (!found) {
+    res.status(404).json({ error: 'Etiqueta no encontrada' })
+    return
+  }
+
+  const parsed = etiquetaSchema.partial().safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Datos inválidos' })
+    return
+  }
+  if (parsed.data.texto === undefined && parsed.data.color === undefined) {
+    res.status(400).json({ error: 'Envía al menos el texto o el color' })
+    return
+  }
+
+  const etiqueta = await prisma.etiqueta.update({
+    where: { id: etiquetaId },
+    data: {
+      ...(parsed.data.texto !== undefined ? { texto: parsed.data.texto } : {}),
+      ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
+    },
+  })
+
+  await notificarColumnasCambiadas(id, userId)
+  res.json({ etiqueta })
+})
+
+// DELETE /api/boards/:id/etiquetas/:etiquetaId — eliminar una etiqueta (se quita de sus tareas)
+router.delete('/:id/etiquetas/:etiquetaId', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  const etiquetaId = String(req.params.etiquetaId)
+  const member = await editableMember(res, id, userId)
+  if (!member) return
+
+  const found = await prisma.etiqueta.findFirst({ where: { id: etiquetaId, tableroId: id } })
+  if (!found) {
+    res.status(404).json({ error: 'Etiqueta no encontrada' })
+    return
+  }
+
+  await prisma.etiqueta.delete({ where: { id: etiquetaId } })
+  await notificarColumnasCambiadas(id, userId)
+  res.status(204).end()
+})
 
 // DELETE /api/boards/:id — eliminar (solo el dueño/creador del tablero)
 router.delete('/:id', async (req: Request, res: Response) => {

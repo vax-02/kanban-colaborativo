@@ -21,6 +21,10 @@ export const taskDetailInclude = {
     include: { usuario: { select: userSelect } },
   },
   checklist: { orderBy: { posicion: 'asc' as const } },
+  comentarios: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { autor: { select: userSelect } },
+  },
 } satisfies Prisma.TareaInclude
 
 export type TaskDetailRow = Prisma.TareaGetPayload<{ include: typeof taskDetailInclude }>
@@ -62,6 +66,20 @@ export function serializeTaskDetail(t: TaskDetailRow) {
       texto: c.texto,
       hecho: c.hecho,
       posicion: c.posicion,
+    })),
+    comentarios: t.comentarios.map((c) => ({
+      id: c.id,
+      texto: c.texto,
+      createdAt: c.createdAt.toISOString(),
+      autor: {
+        id: c.autor.id,
+        nombre: c.autor.nombre,
+        apellidos: c.autor.apellidos,
+        email: c.autor.email,
+        avatarColor: c.autor.avatarColor,
+        avatarUrl: c.autor.avatarUrl,
+        iniciales: `${c.autor.nombre[0]}${c.autor.apellidos[0]}`.toUpperCase(),
+      },
     })),
   }
 }

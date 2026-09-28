@@ -103,7 +103,7 @@ export default function FiltersModal({ onClose }: Props) {
     if (!board) return 0
     const filtro: TaskFilters = { boardId: board.id, members, labels, prio, due, showDone }
     return board.columnas
-      .filter((c) => showDone || !isDoneColumn(c.titulo))
+      .filter((c) => showDone || !isDoneColumn(c))
       .reduce((acc, c) => acc + c.tareas.filter((t) => taskMatchesFilters(t, filtro)).length, 0)
   }, [board, members, labels, prio, due, showDone])
 

@@ -4,14 +4,25 @@ import {
   Check,
   Flag,
   LoaderCircle,
+  MessageSquare,
   Plus,
+  Send,
   Tag,
   Trash2,
   X,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useBoardsStore } from '../../store/boardsStore'
-import type { BoardDetailDto, ChecklistDto, Prioridad, TaskDto } from '../../lib/types'
+import { useAuthStore } from '../../store/authStore'
+import { formatUpdated } from '../../lib/format'
+import type {
+  BoardDetailDto,
+  ChecklistDto,
+  ComentarioDto,
+  MemberDto,
+  Prioridad,
+  TaskDto,
+} from '../../lib/types'
 import Modal from '../Modal'
 import Avatar from '../Avatar'
 
@@ -49,6 +60,40 @@ function toDateInput(iso: string | null) {
   return iso ? iso.slice(0, 10) : ''
 }
 
+const MENTION_RE = /@[\p{L}']+(?:\s+[\p{L}']+)?/gu
+
+function mencionValida(mencion: string, miembros: MemberDto[]): boolean {
+  const lower = mencion.toLowerCase()
+  return miembros.some((m) => {
+    const nombre = m.nombre.toLowerCase()
+    const apellidos = m.apellidos.toLowerCase()
+    return lower === `@${nombre}` || lower === `@${nombre} ${apellidos}`
+  })
+}
+
+function renderMenciones(texto: string, miembros: MemberDto[]): React.ReactNode {
+  const partes: React.ReactNode[] = []
+  let last = 0
+  for (const match of texto.matchAll(MENTION_RE)) {
+    const idx = match.index ?? 0
+    const token = match[0]
+    if (idx > last) partes.push(<span key={`plain-${partes.length}`}>{texto.slice(last, idx)}</span>)
+    const valida = mencionValida(token, miembros)
+    partes.push(
+      valida ? (
+        <span key={`ok-${partes.length}`} className="font-semibold text-brand-600">
+          {token}
+        </span>
+      ) : (
+        <span key={`no-${partes.length}`}>{token}</span>
+      ),
+    )
+    last = idx + token.length
+  }
+  if (last < texto.length) partes.push(<span key={`rest-${partes.length}`}>{texto.slice(last)}</span>)
+  return partes.length ? partes : texto
+}
+
 export default function TaskModal({ boardId, columnId, taskId, onClose }: Props) {
   const getBoard = useBoardsStore((s) => s.getBoard)
   const createTask = useBoardsStore((s) => s.createTask)
@@ -68,6 +113,9 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
   const [asignados, setAsignados] = useState<string[]>([])
   const [etiquetasSel, setEtiquetasSel] = useState<{ texto: string; color: string }[]>([])
   const [nuevaEtiqueta, setNuevaEtiqueta] = useState('')
+  const [comentarios, setComentarios] = useState<ComentarioDto[]>([])
+  const [nuevoComentario, setNuevoComentario] = useState('')
+  const [enviandoComentario, setEnviandoComentario] = useState(false)
 
   const [columnaSel, setColumnaSel] = useState(columnId)
 
@@ -98,6 +146,7 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
           )
           setAsignados(loaded.asignaciones.map((a) => a.id))
           setEtiquetasSel(loaded.etiquetas.map((e) => ({ texto: e.texto, color: e.color })))
+          setComentarios(loaded.comentarios ?? [])
         }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'No se pudo cargar la tarjeta')
@@ -159,6 +208,26 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
     })
 
   const removeCheck = (i: number) => setChecklist((prev) => prev.filter((_, idx) => idx !== i))
+
+  const enviarComentario = async () => {
+    const texto = nuevoComentario.trim()
+    if (!texto || !taskId || enviandoComentario) return
+    setEnviandoComentario(true)
+    setError(null)
+    try {
+      const res = await api<{ comentario: ComentarioDto }>(`/tasks/${taskId}/comentarios`, {
+        method: 'POST',
+        body: JSON.stringify({ texto }),
+      })
+      setComentarios((prev) => [...prev, res.comentario])
+      setNuevoComentario('')
+      useBoardsStore.getState().bumpTask()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo enviar el comentario')
+    } finally {
+      setEnviandoComentario(false)
+    }
+  }
 
   const guardar = async () => {
     if (!canSave) return
@@ -529,6 +598,81 @@ export default function TaskModal({ boardId, columnId, taskId, onClose }: Props)
           </div>
         </div>
       </div>
+
+      {/* ==== Comentarios ==== */}
+      {taskId && (
+        <div className="mt-6 border-t border-ink-200 pt-5">
+          <div className="mb-3 flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-ink-400" />
+            <p className="text-sm font-bold text-ink-900">Comentarios</p>
+            <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold text-ink-500">
+              {comentarios.length}
+            </span>
+          </div>
+
+          <ul className="mb-4 space-y-3">
+            {comentarios.length === 0 && (
+              <li className="text-sm text-ink-400">
+                Aún no hay comentarios. Escribe el primero escribiendo{' '}
+                <code className="rounded bg-ink-100 px-1 py-0.5 text-xs text-brand-600">@Nombre</code>{' '}
+                para avisar a alguien.
+              </li>
+            )}
+            {comentarios.map((c) => (
+              <li key={c.id} className="flex items-start gap-2.5">
+                <Avatar
+                  initials={c.autor.iniciales}
+                  color={c.autor.avatarColor}
+                  name={`${c.autor.nombre} ${c.autor.apellidos}`}
+                  size="sm"
+                  className="mt-0.5"
+                />
+                <div className="min-w-0 flex-1 rounded-xl bg-ink-50 px-3 py-2.5">
+                  <div className="mb-1 flex items-center gap-2">
+                    <p className="text-xs font-bold text-ink-800">
+                      {c.autor.nombre} {c.autor.apellidos}
+                    </p>
+                    <span className="text-[10px] text-ink-400">{formatUpdated(c.createdAt)}</span>
+                  </div>
+                  <p className="text-xs leading-relaxed whitespace-pre-wrap text-ink-700">
+                    {renderMenciones(c.texto, board?.miembros ?? [])}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <div className="flex items-start gap-2.5">
+            <Avatar
+              initials={useAuthStore.getState().user?.iniciales ?? ''}
+              color={useAuthStore.getState().user?.avatarColor ?? '#6366f1'}
+              size="sm"
+              className="mt-0.5"
+            />
+            <textarea
+              value={nuevoComentario}
+              onChange={(e) => setNuevoComentario(e.target.value)}
+              placeholder="Escribe un comentario… usa @Nombre Apellido para mencionar"
+              rows={2}
+              className="input flex-1 resize-none text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => void enviarComentario()}
+              disabled={!nuevoComentario.trim() || enviandoComentario}
+              className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {enviandoComentario ? 'Enviando…' : 'Comentar'}
+            </button>
+          </div>
+          {nuevoComentario.includes('@') && (
+            <div className="mt-2 rounded-xl bg-ink-50 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-ink-700">
+              {renderMenciones(nuevoComentario, board?.miembros ?? [])}
+            </div>
+          )}
+        </div>
+      )}
     </Modal>
   )
 }

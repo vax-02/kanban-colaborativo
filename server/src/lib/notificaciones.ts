@@ -6,6 +6,7 @@ import { userSelect } from './tasks'
 
 const notificacionInclude = {
   tablero: { select: { id: true, nombre: true, color: true } },
+  tarea: { select: { id: true, titulo: true } },
   invitacion: {
     include: {
       creadoPor: { select: userSelect },
@@ -29,6 +30,9 @@ export function serializeNotificacion(n: NotificacionRow) {
     tablero: n.tablero
       ? { id: n.tablero.id, nombre: n.tablero.nombre, color: n.tablero.color }
       : null,
+    tarea: n.tarea
+      ? { id: n.tarea.id, titulo: n.tarea.titulo }
+      : null,
     invitacion: n.invitacion
       ? {
           id: n.invitacion.id,
@@ -49,10 +53,18 @@ export function serializeNotificacion(n: NotificacionRow) {
 
 export async function crearNotificacion(input: {
   usuarioId: string
-  tipo: 'INVITACION' | 'INVITACION_ACEPTADA' | 'INVITACION_RECHAZADA'
+  tipo:
+    | 'INVITACION'
+    | 'INVITACION_ACEPTADA'
+    | 'INVITACION_RECHAZADA'
+    | 'TAREA_ASIGNADA'
+    | 'TAREA_MOVIDA'
+    | 'TAREA_MENCION'
+    | 'TAREA_POR_VENCER'
   titulo: string
   cuerpo?: string | null
   tableroId?: string | null
+  tareaId?: string | null
   invitacionId?: string | null
 }) {
   const notificacion = await prisma.notificacion.create({
@@ -62,6 +74,7 @@ export async function crearNotificacion(input: {
       titulo: input.titulo,
       cuerpo: input.cuerpo ?? null,
       tableroId: input.tableroId ?? null,
+      tareaId: input.tareaId ?? null,
       invitacionId: input.invitacionId ?? null,
     },
     include: notificacionInclude,

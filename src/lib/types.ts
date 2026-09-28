@@ -46,6 +46,7 @@ export type BoardDto = {
   color: string
   plantilla: Plantilla
   esPrivado: boolean
+  archivado: boolean
   esFavorito: boolean
   tareas: number
   done: number
@@ -55,6 +56,12 @@ export type BoardDto = {
 }
 
 export type EtiquetaDto = { id: string; texto: string; color: string }
+export type ComentarioDto = {
+  id: string
+  texto: string
+  createdAt: string
+  autor: UserMini & { email: string; avatarColor: string; avatarUrl: string | null }
+}
 export type ChecklistDto = {
   id: string
   texto: string
@@ -73,6 +80,7 @@ export type TaskDto = {
   etiquetas: EtiquetaDto[]
   asignaciones: MemberDto[]
   checklist: ChecklistDto[]
+  comentarios: ComentarioDto[]
 }
 
 export type ColumnaDto = {
@@ -80,6 +88,7 @@ export type ColumnaDto = {
   titulo: string
   color: string
   posicion: number
+  esFinalizada: boolean
   tareas: TaskDto[]
 }
 
@@ -90,6 +99,7 @@ export type BoardDetailDto = {
   color: string
   plantilla: Plantilla
   esPrivado: boolean
+  archivado: boolean
   esFavorito: boolean
   updatedAt: string
   creadoPor: UserMini
@@ -154,12 +164,20 @@ export type InvitacionDto = {
 
 export type NotificacionDto = {
   id: string
-  tipo: string
+  tipo:
+    | 'INVITACION'
+    | 'INVITACION_ACEPTADA'
+    | 'INVITACION_RECHAZADA'
+    | 'TAREA_ASIGNADA'
+    | 'TAREA_MOVIDA'
+    | 'TAREA_MENCION'
+    | 'TAREA_POR_VENCER'
   titulo: string
   cuerpo: string | null
   leida: boolean
   createdAt: string
   tablero: { id: string; nombre: string; color: string } | null
+  tarea: { id: string; titulo: string } | null
   invitacion: {
     id: string
     rol: RolTablero

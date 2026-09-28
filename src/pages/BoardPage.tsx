@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Archive,
+  ArchiveRestore,
   KanbanSquare,
   LoaderCircle,
   Plus,
   SlidersHorizontal,
+  Tag,
   Trash2,
   Users,
 } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import KanbanBoard from '../components/KanbanBoard'
 import Modal from '../components/Modal'
 import { useAuthStore } from '../store/authStore'
@@ -24,7 +27,22 @@ import { formatDue, formatUpdated, shortName } from '../lib/format'
 import type { ColumnaDto, TaskDto, BoardDetailDto } from '../lib/types'
 import type { Column, Label, Person, Task } from '../data/mock'
 
-function toTask(t: TaskDto): Task {
+function dueStateOf(
+  iso: string | null,
+  done: boolean,
+): 'overdue' | 'today' | 'upcoming' | 'none' {
+  if (!iso || done) return 'none'
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  const d = new Date(iso)
+  d.setHours(0, 0, 0, 0)
+  const diff = Math.round((d.getTime() - hoy.getTime()) / 86_400_000)
+  if (diff < 0) return 'overdue'
+  if (diff === 0) return 'today'
+  return 'upcoming'
+}
+
+function toTask(t: TaskDto, done: boolean): Task {
   return {
     id: t.id,
     title: t.titulo,
@@ -40,6 +58,7 @@ function toTask(t: TaskDto): Task {
       online: a.online,
     })),
     due: formatDue(t.fechaVencimiento),
+    dueState: dueStateOf(t.fechaVencimiento, done),
     checklist: t.checklist.length
       ? { done: t.checklist.filter((c) => c.hecho).length, total: t.checklist.length }
       : undefined,
@@ -47,7 +66,13 @@ function toTask(t: TaskDto): Task {
 }
 
 function toColumn(c: ColumnaDto): Column {
-  return { id: c.id, title: c.titulo, color: c.color, tasks: c.tareas.map(toTask) }
+  return {
+    id: c.id,
+    title: c.titulo,
+    color: c.color,
+    isDone: c.esFinalizada,
+    tasks: c.tareas.map((t) => toTask(t, c.esFinalizada)),
+  }
 }
 
 const COLUMN_COLORS = [
@@ -73,7 +98,10 @@ function BoardLoader({ boardId }: { boardId: string }) {
   const updateColumn = useBoardsStore((s) => s.updateColumn)
   const deleteColumn = useBoardsStore((s) => s.deleteColumn)
   const reorderColumns = useBoardsStore((s) => s.reorderColumns)
+  const setArchivado = useBoardsStore((s) => s.setArchivado)
   const filterState = useFiltersStore((s) => s.filters)
+  const [params] = useSearchParams()
+  const openedTask = useRef<string | null>(null)
   const [board, setBoard] = useState<BoardDetailDto | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [columnForm, setColumnForm] = useState({ open: false, titulo: '', color: '#94a3b8' })
@@ -100,10 +128,40 @@ function BoardLoader({ boardId }: { boardId: string }) {
     }
   }, [boardId, taskV, membersV, getBoard])
 
+  const tareaParam = params.get('tarea')
+  useEffect(() => {
+    if (!tareaParam || !board || openedTask.current === tareaParam) return
+    const col = board.columnas.find((c) => c.tareas.some((t) => t.id === tareaParam))
+    if (!col) return
+    openedTask.current = tareaParam
+    openModal({ type: 'task', taskId: tareaParam, columnId: col.id, boardId: board.id })
+  }, [tareaParam, board, openModal])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (useUiStore.getState().modal) return
+      if (e.key === 'n' || e.key === 'N') {
+        const first = board?.columnas[0]
+        const viewerRol = board?.miembros.find((m) => m.id === me?.id)?.rol
+        if (first && viewerRol && viewerRol !== 'LECTURA') {
+          openModal({ type: 'task', taskId: '', columnId: first.id, boardId: board.id })
+        }
+      }
+      if (e.key === '/') {
+        e.preventDefault()
+        document.getElementById('topbar-search')?.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [board, me?.id, openModal])
+
   const visibleColumns = useMemo(() => {
     if (!board || filterState.boardId !== board.id) return board?.columnas ?? []
     return board.columnas
-      .filter((c) => filterState.showDone || !isDoneColumn(c.titulo))
+      .filter((c) => filterState.showDone || !isDoneColumn(c))
       .map((c) => ({
         ...c,
         tareas: c.tareas.filter((t) => taskMatchesFilters(t, filterState)),
@@ -215,6 +273,15 @@ function BoardLoader({ boardId }: { boardId: string }) {
             <Users className="h-3.5 w-3.5" />
             {board.miembros.length} miembros
           </button>
+          <button
+            type="button"
+            onClick={() => openModal({ type: 'labels', boardId: board.id })}
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-ink-600 transition hover:border-brand-300 hover:text-brand-600"
+            title="Gestionar etiquetas del tablero"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Etiquetas
+          </button>
           {filtered && (
             <span className="flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-200">
               <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -226,6 +293,31 @@ function BoardLoader({ boardId }: { boardId: string }) {
           </span>
         </div>
       </div>
+
+      {board.archivado && (
+        <div className="mb-4 flex items-center gap-3 rounded-2xl border border-ink-200 bg-ink-100/70 px-4 py-3">
+          <Archive className="h-5 w-5 shrink-0 text-ink-500" />
+          <p className="min-w-0 flex-1 text-sm font-semibold text-ink-700">
+            Este tablero está archivado y no aparece en el listado ni en el menú lateral.
+          </p>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await setArchivado(board.id, false)
+                } catch {
+                  /* si falla, se recarga el tablero para volver al estado real */
+                }
+              }}
+              className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-ink-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-ink-700"
+            >
+              <ArchiveRestore className="h-3.5 w-3.5" />
+              Restaurar
+            </button>
+          )}
+        </div>
+      )}
 
       <KanbanBoard
         initialColumns={visibleColumns.map(toColumn)}
@@ -244,6 +336,13 @@ function BoardLoader({ boardId }: { boardId: string }) {
         onRenameColumn={async (columnaId, titulo) => {
           try {
             await updateColumn(board.id, columnaId, { titulo })
+          } catch {
+            bumpTask()
+          }
+        }}
+        onToggleDoneColumn={async (columnaId, esFinalizada) => {
+          try {
+            await updateColumn(board.id, columnaId, { esFinalizada })
           } catch {
             bumpTask()
           }

@@ -37,7 +37,7 @@ type BoardsStore = {
   updateColumn: (
     boardId: string,
     columnaId: string,
-    data: { titulo?: string; color?: string },
+    data: { titulo?: string; color?: string; esFinalizada?: boolean },
   ) => Promise<void>
   deleteColumn: (boardId: string, columnaId: string, moverA?: string) => Promise<void>
   reorderColumns: (boardId: string, ids: string[]) => Promise<void>
@@ -63,6 +63,14 @@ type BoardsStore = {
   acceptInvitation: (id: string) => Promise<void>
   rejectInvitation: (id: string) => Promise<void>
   cancelInvite: (boardId: string, usuarioId: string) => Promise<void>
+  setArchivado: (id: string, archivado: boolean) => Promise<void>
+  createLabel: (boardId: string, data: { texto: string; color: string }) => Promise<void>
+  updateLabel: (
+    boardId: string,
+    etiquetaId: string,
+    data: { texto?: string; color?: string },
+  ) => Promise<void>
+  deleteLabel: (boardId: string, etiquetaId: string) => Promise<void>
 }
 
 export const useBoardsStore = create<BoardsStore>((set, get) => ({
@@ -294,5 +302,38 @@ export const useBoardsStore = create<BoardsStore>((set, get) => ({
   async cancelInvite(boardId, usuarioId) {
     await api<void>(`/boards/${boardId}/invitaciones/${usuarioId}`, { method: 'DELETE' })
     get().bumpMembers()
+  },
+
+  async setArchivado(id, archivado) {
+    await api<{ board: { id: string; archivado: boolean } }>(`/boards/${id}/archivado`, {
+      method: 'PUT',
+      body: JSON.stringify({ archivado }),
+    })
+    set({
+      boards: get().boards.map((b) => (b.id === id ? { ...b, archivado } : b)),
+    })
+  },
+
+  async createLabel(boardId, data) {
+    await api(`/boards/${boardId}/etiquetas`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+    get().bumpTask()
+  },
+
+  async updateLabel(boardId, etiquetaId, data) {
+    await api(`/boards/${boardId}/etiquetas/${etiquetaId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+    get().bumpTask()
+  },
+
+  async deleteLabel(boardId, etiquetaId) {
+    await api<void>(`/boards/${boardId}/etiquetas/${etiquetaId}`, {
+      method: 'DELETE',
+    })
+    get().bumpTask()
   },
 }))

@@ -17,15 +17,15 @@ export type Task = {
   labels: Label[]
   assignees: Person[]
   due: string
+  dueState?: 'overdue' | 'today' | 'upcoming' | 'none'
   checklist?: { done: number; total: number }
-  comments?: number
-  attachments?: number
 }
 
 export type Column = {
   id: string
   title: string
   color: string
+  isDone: boolean
   tasks: Task[]
 }
 
@@ -43,6 +43,7 @@ export const columns: Column[] = [
     id: 'c1',
     title: 'Pendiente',
     color: '#94a3b8',
+    isDone: false,
     tasks: [
       {
         id: 't1',
@@ -52,8 +53,6 @@ export const columns: Column[] = [
         assignees: [team[0], team[2]],
         due: 'Mar 5',
         checklist: { done: 1, total: 4 },
-        comments: 3,
-        attachments: 2,
       },
       {
         id: 't2',
@@ -61,7 +60,6 @@ export const columns: Column[] = [
         labels: [{ text: 'Ventas', color: '#0ea5e9' }, { text: 'Alta prioridad', color: '#ef4444' }],
         assignees: [team[1]],
         due: 'Mar 8',
-        comments: 1,
       },
       {
         id: 't3',
@@ -77,6 +75,7 @@ export const columns: Column[] = [
     id: 'c2',
     title: 'En progreso',
     color: '#f59e0b',
+    isDone: false,
     tasks: [
       {
         id: 't4',
@@ -86,8 +85,6 @@ export const columns: Column[] = [
         assignees: [team[0]],
         due: 'Hoy',
         checklist: { done: 3, total: 5 },
-        comments: 5,
-        attachments: 1,
       },
       {
         id: 't5',
@@ -95,7 +92,6 @@ export const columns: Column[] = [
         labels: [{ text: 'Backend', color: '#ef4444' }],
         assignees: [team[5], team[3]],
         due: 'Mañana',
-        comments: 2,
       },
       {
         id: 't6',
@@ -110,6 +106,7 @@ export const columns: Column[] = [
     id: 'c3',
     title: 'En revisión',
     color: '#0ea5e9',
+    isDone: false,
     tasks: [
       {
         id: 't7',
@@ -118,7 +115,6 @@ export const columns: Column[] = [
         assignees: [team[2], team[4]],
         due: 'Mar 3',
         checklist: { done: 2, total: 3 },
-        comments: 4,
       },
       {
         id: 't8',
@@ -126,7 +122,6 @@ export const columns: Column[] = [
         labels: [{ text: 'Frontend', color: '#6366f1' }],
         assignees: [team[0]],
         due: 'Mar 2',
-        attachments: 3,
       },
     ],
   },
@@ -134,6 +129,7 @@ export const columns: Column[] = [
     id: 'c4',
     title: 'Terminado',
     color: '#10b981',
+    isDone: true,
     tasks: [
       {
         id: 't9',
@@ -148,7 +144,6 @@ export const columns: Column[] = [
         labels: [{ text: 'UI', color: '#8b5cf6' }],
         assignees: [team[2], team[4]],
         due: 'Feb 26',
-        comments: 6,
       },
     ],
   },

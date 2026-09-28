@@ -1,15 +1,38 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  AtSign,
   Bell,
   Check,
   CheckCheck,
+  Clock,
+  MoveRight,
+  UserPlus,
   Users,
 } from 'lucide-react'
 import Avatar from '../components/Avatar'
 import { useNotificationsStore } from '../store/notificationsStore'
 import { useBoardsStore } from '../store/boardsStore'
 import type { NotificacionDto } from '../lib/types'
+
+function iconoTipo(tipo: string) {
+  switch (tipo) {
+    case 'INVITACION':
+      return { Icon: UserPlus, color: '#0ea5e9' }
+    case 'INVITACION_ACEPTADA':
+      return { Icon: Check, color: '#10b981' }
+    case 'TAREA_ASIGNADA':
+      return { Icon: UserPlus, color: '#f59e0b' }
+    case 'TAREA_MOVIDA':
+      return { Icon: MoveRight, color: '#0ea5e9' }
+    case 'TAREA_MENCION':
+      return { Icon: AtSign, color: '#8b5cf6' }
+    case 'TAREA_POR_VENCER':
+      return { Icon: Clock, color: '#ef4444' }
+    default:
+      return { Icon: Users, color: '#94a3b8' }
+  }
+}
 
 const roleLabel: Record<string, string> = {
   ADMINISTRADOR: 'Administradora',
@@ -141,11 +164,15 @@ export default function NotificationsPage() {
           {list.map((n) => {
             const isRead = n.leida
             const actor = n.invitacion?.creadoPor
+            const NotifIcon = iconoTipo(n.tipo).Icon
+            const notifColor = iconoTipo(n.tipo).color
             return (
               <li
                 key={n.id}
                 onClick={() => {
-                  if (n.tablero?.id) {
+                  if (n.tarea && n.tablero?.id) {
+                    navigate(`/tableros/${n.tablero.id}?tarea=${n.tarea.id}`)
+                  } else if (n.tablero?.id) {
                     navigate(`/tableros/${n.tablero.id}`)
                   }
                 }}
@@ -162,8 +189,11 @@ export default function NotificationsPage() {
                     className="mt-0.5"
                   />
                 ) : (
-                  <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
-                    <Users className="h-5 w-5" />
+                  <span
+                    className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+                    style={{ backgroundColor: `${notifColor}18`, color: notifColor }}
+                  >
+                    <NotifIcon className="h-5 w-5" />
                   </span>
                 )}
 

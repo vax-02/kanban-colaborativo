@@ -102,6 +102,10 @@ export const useNotificationsStore = create<NotificationsStore>((set, get) => ({
       useBoardsStore.getState().bumpTask()
     })
 
+    socket.on('tablero:cambio', () => {
+      void useBoardsStore.getState().loadBoards()
+    })
+
     socket.connect()
   },
 

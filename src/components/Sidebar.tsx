@@ -49,11 +49,13 @@ export default function Sidebar() {
 
   const unreadNotifs = notificaciones.filter((n) => !n.leida).length
 
-  const sortedBoards = [...boards].sort(
-    (a, b) =>
-      Number(b.esFavorito) - Number(a.esFavorito) ||
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  )
+  const sortedBoards = boards
+    .filter((b) => !b.archivado)
+    .sort(
+      (a, b) =>
+        Number(b.esFavorito) - Number(a.esFavorito) ||
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    )
 
   const onLogout = () => {
     logout()

@@ -42,6 +42,10 @@ enum TipoNotificacion {
   INVITACION
   INVITACION_ACEPTADA
   INVITACION_RECHAZADA
+  TAREA_ASIGNADA
+  TAREA_MOVIDA
+  TAREA_MENCION
+  TAREA_POR_VENCER
 }
 
 enum TipoActividad {
@@ -83,6 +87,7 @@ model Usuario {
   actividadesAutor       Actividad[]           @relation("ActividadAutor")
   actividadesRelacionadas Actividad[]           @relation("ActividadUsuario")
   membresias             Membresia[]
+  comentarios            Comentario[]
 
   @@map("usuarios")
 }
@@ -94,6 +99,7 @@ model Tablero {
   color       String           @default("#6366f1") @db.VarChar(7)
   plantilla   PlantillaTablero @default(PROYECTO)
   esPrivado   Boolean          @default(false) @map("es_privado")
+  archivado   Boolean          @default(false)
   creadoPorId String           @map("creado_por_id") @db.VarChar(36)
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
@@ -149,13 +155,14 @@ model TableroMiembro {
 }
 
 model Columna {
-  id        String   @id @default(uuid()) @db.VarChar(36)
-  tableroId String   @map("tablero_id") @db.VarChar(36)
-  titulo    String   @db.VarChar(100)
-  color     String   @default("#94a3b8") @db.VarChar(7)
-  posicion  Int      @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid()) @db.VarChar(36)
+  tableroId     String   @map("tablero_id") @db.VarChar(36)
+  titulo        String   @db.VarChar(100)
+  color         String   @default("#94a3b8") @db.VarChar(7)
+  posicion      Int      @default(0)
+  esFinalizada  Boolean  @default(false) @map("es_finalizada")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   tablero Tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
   tareas  Tarea[]
@@ -182,10 +189,26 @@ model Tarea {
   asignaciones TareaAsignacion[]
   checklist    ChecklistItem[]
   actividades  Actividad[]
+  comentarios  Comentario[]
+  notificaciones Notificacion[]
 
   @@index([columnaId])
   @@index([creadoPorId])
   @@map("tareas")
+}
+
+model Comentario {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  tareaId   String   @map("tarea_id") @db.VarChar(36)
+  autorId   String   @map("autor_id") @db.VarChar(36)
+  texto     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tarea Tarea   @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  autor Usuario @relation(fields: [autorId], references: [id], onDelete: Cascade)
+
+  @@index([tareaId])
+  @@map("comentarios")
 }
 
 model Etiqueta {
@@ -307,17 +330,20 @@ model Notificacion {
   titulo       String           @db.VarChar(255)
   cuerpo       String?          @db.VarChar(500)
   tableroId    String?          @map("tablero_id") @db.VarChar(36)
+  tareaId      String?          @map("tarea_id") @db.VarChar(36)
   invitacionId String?          @map("invitacion_id") @db.VarChar(36)
   leida        Boolean          @default(false)
   createdAt    DateTime         @default(now()) @map("created_at")
 
   usuario    Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   tablero    Tablero?   @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  tarea      Tarea?     @relation(fields: [tareaId], references: [id], onDelete: Cascade)
   invitacion Invitacion? @relation(fields: [invitacionId], references: [id], onDelete: Cascade)
 
   @@index([usuarioId, leida])
   @@index([usuarioId])
   @@index([tableroId])
+  @@index([usuarioId, tareaId])
   @@map("notificaciones")
 }
 

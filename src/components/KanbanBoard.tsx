@@ -6,8 +6,6 @@ import {
   CircleDashed,
   CircleDot,
   GripVertical,
-  MessageSquare,
-  Paperclip,
   Pencil,
   Plus,
   Trash2,
@@ -21,6 +19,7 @@ type Props = {
   onMoveTask?: (taskId: string, fromColumnId: string, toColumnId: string, toIndex: number) => void
   onNewColumn?: () => void
   onRenameColumn?: (columnId: string, titulo: string) => void
+  onToggleDoneColumn?: (columnId: string, esFinalizada: boolean) => void
   onDeleteColumn?: (columnId: string) => void
   onReorderColumns?: (ids: string[]) => void
   canEdit?: boolean
@@ -35,10 +34,11 @@ type StatusIconProps = {
 function StatusIcon({ column, className, strokeWidth = 2 }: StatusIconProps) {
   const props = { className, strokeWidth, style: { color: column.color } }
   const title = column.title.toLowerCase()
-  if (title.includes('pendiente')) return <CircleDashed {...props} />
-  if (title.includes('progreso')) return <CircleDot {...props} />
+  if (column.isDone) return <CheckCircle2 {...props} />
+  if (title.includes('pendiente') || title.includes('backlog')) return <CircleDashed {...props} />
+  if (title.includes('progreso') || title.includes('curso') || title.includes('sprint'))
+    return <CircleDot {...props} />
   if (title.includes('revisi')) return <CircleAlert {...props} />
-  if (title.includes('termin')) return <CheckCircle2 {...props} />
   return <CircleDot {...props} />
 }
 
@@ -135,30 +135,33 @@ function TaskCard({
         </div>
       )}
 
-      {/* Pie de tarjeta */}
-      <div className="flex items-center gap-3 text-ink-400">
-        <span
-          className="flex items-center gap-1 text-[11px] font-medium"
-          style={{ color: task.due === 'Hoy' ? '#ef4444' : undefined }}
-        >
-          <CalendarDays className="h-3.5 w-3.5" />
-          {task.due}
-        </span>
+{/* Pie de tarjeta */}
+        <div className="flex items-center gap-3 text-ink-400">
+          {(task.dueState === 'overdue' ||
+            task.dueState === 'today' ||
+            task.due === 'Hoy') && (
+            <span
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold"
+              style={{
+                color: '#ef4444',
+                backgroundColor: task.dueState === 'upcoming' ? undefined : '#ef444414',
+              }}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              {task.dueState === 'overdue' ? `Vencida · ${task.due}` : task.due}
+            </span>
+          )}
+          {!(task.dueState === 'overdue' || task.dueState === 'today' || task.due === 'Hoy') && (
+            <span
+              className="flex items-center gap-1 text-[11px] font-medium"
+              style={{ color: task.dueState === 'upcoming' ? '#64748b' : undefined }}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              {task.due}
+            </span>
+          )}
 
-        {task.comments !== undefined && (
-          <span className="flex items-center gap-1 text-[11px] font-medium">
-            <MessageSquare className="h-3.5 w-3.5" />
-            {task.comments}
-          </span>
-        )}
-        {task.attachments !== undefined && (
-          <span className="flex items-center gap-1 text-[11px] font-medium">
-            <Paperclip className="h-3.5 w-3.5" />
-            {task.attachments}
-          </span>
-        )}
-
-        <div className="ml-auto flex -space-x-1.5">
+          <div className="ml-auto flex -space-x-1.5">
           {task.assignees.map((a) => (
             <span
               key={a.id}
@@ -182,6 +185,7 @@ export default function KanbanBoard({
   onMoveTask,
   onNewColumn,
   onRenameColumn,
+  onToggleDoneColumn,
   onDeleteColumn,
   onReorderColumns,
   canEdit = false,
@@ -342,6 +346,25 @@ export default function KanbanBoard({
                 {col.tasks.length}
               </span>
               <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleDoneColumn?.(col.id, !col.isDone)}
+                    aria-pressed={col.isDone}
+                    title={
+                      col.isDone
+                        ? 'Quitar como columna de cierre'
+                        : 'Marcar como columna de cierre (las tareas cuentan como completadas)'
+                    }
+                    className={`cursor-pointer rounded-lg p-1.5 transition ${
+                      col.isDone
+                        ? 'bg-emerald-100 text-emerald-600'
+                        : 'text-ink-400 hover:bg-ink-200 hover:text-ink-700'
+                    }`}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                  </button>
+                )}
                 {canEdit && (
                   <button
                     type="button"
