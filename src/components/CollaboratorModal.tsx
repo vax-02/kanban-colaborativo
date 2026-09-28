@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Check,
   ChevronDown,
-  LoaderCircle,
-  Mail,
   Search,
-  Send,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -118,7 +115,7 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchedUser[]>([])
-  const [email, setEmail] = useState('')
+  
   const [role, setRole] = useState<RolTablero>('MIEMBRO')
   const [busy, setBusy] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -181,24 +178,6 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
     setHistorial([])
     setErrorMsg(null)
     setSentMsg(null)
-  }
-
-  const inviteByEmail = async (emailToInvite: string) => {
-    setBusy('email')
-    setErrorMsg(null)
-    setSentMsg(null)
-    try {
-      await sendInvite(selectedBoardId, '', role, emailToInvite)
-      setSentMsg(`Invitación enviada a ${emailToInvite}`)
-      // actualiza las invitaciones pendientes
-      const inv = await getBoard(selectedBoardId)
-      setPendingInvites(inv.invitaciones)
-      setEmail('')
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : 'No se pudo invitar')
-    } finally {
-      setBusy(null)
-    }
   }
 
   const inviteById = async (usuarioId: string) => {
@@ -414,50 +393,11 @@ export default function CollaboratorModal({ boardId, onClose }: Props) {
             </div>
           )}
 
-          {query.trim().length >= 2 && results.length === 0 && (
+{query.trim().length >= 2 && results.length === 0 && (
             <p className="mb-4 rounded-xl border border-dashed border-ink-300 bg-ink-50 px-4 py-3 text-center text-xs text-ink-500">
               No hay usuarios registrados con ese correo o nombre.
             </p>
           )}
-
-          {/* Invitar directamente por correo */}
-          <div className="mb-5 rounded-xl border border-ink-200 bg-ink-50 p-3">
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-ink-700">
-              <Mail className="h-3.5 w-3.5 text-ink-400" />
-              Invitar por correo electrónico
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const value = email.trim()
-                    if (value) void inviteByEmail(value)
-                  }
-                }}
-                placeholder="correo@empresa.com"
-                className="input"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const value = email.trim()
-                  if (value) void inviteByEmail(value)
-                }}
-                disabled={!email.trim() || busy === 'email'}
-                className="btn-primary shrink-0"
-              >
-                {busy === 'email' ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                Invitar
-              </button>
-            </div>
-          </div>
 
           {/* Invitaciones pendientes */}
           {pendingInvites.length > 0 && (
