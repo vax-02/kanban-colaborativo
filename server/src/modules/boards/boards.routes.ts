@@ -547,17 +547,20 @@ router.delete(
   },
 )
 
-// DELETE /api/boards/:id — eliminar (solo Administrador)
+// DELETE /api/boards/:id — eliminar (solo el dueño/creador del tablero)
 router.delete('/:id', async (req: Request, res: Response) => {
   const { userId } = req as AuthedRequest
   const id = String(req.params.id)
-  const member = await isMember(id, userId)
-  if (!member) {
+  const board = await prisma.tablero.findUnique({
+    where: { id },
+    select: { id: true, creadoPorId: true },
+  })
+  if (!board) {
     res.status(404).json({ error: 'Tablero no encontrado' })
     return
   }
-  if (member.rol !== 'ADMINISTRADOR') {
-    res.status(403).json({ error: 'Solo el administrador puede eliminar el tablero' })
+  if (board.creadoPorId !== userId) {
+    res.status(403).json({ error: 'Solo el dueño del tablero puede eliminarlo' })
     return
   }
 
