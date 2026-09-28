@@ -12,7 +12,7 @@ router.get('/', async (req: Request, res: Response) => {
   const notificaciones = await prisma.notificacion.findMany({
     where: { usuarioId: userId },
     orderBy: { createdAt: 'desc' },
-    take: 30,
+    take: 100,
     include: notificacionInclude,
   })
   res.json({ notificaciones: notificaciones.map(serializeNotificacion) })
@@ -41,6 +41,16 @@ router.put('/leidas', async (req: Request, res: Response) => {
     data: { leida: true },
   })
   res.json({ ok: true })
+})
+
+// DELETE /api/notificaciones/:id — eliminar una notificación propia
+router.delete('/:id', async (req: Request, res: Response) => {
+  const { userId } = req as AuthedRequest
+  const id = String(req.params.id)
+  await prisma.notificacion
+    .deleteMany({ where: { id, usuarioId: userId } })
+    .catch(() => undefined)
+  res.status(204).end()
 })
 
 export default router
