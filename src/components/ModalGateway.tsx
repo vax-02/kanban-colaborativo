@@ -6,6 +6,7 @@ import BoardMembersModal from './modals/BoardMembersModal'
 import TaskModal from './modals/TaskModal'
 import FiltersModal from './modals/FiltersModal'
 import ActivityModal from './modals/ActivityModal'
+import DeleteBoardModal from './modals/DeleteBoardModal'
 
 export default function ModalGateway() {
   const { modal, closeModal } = useUiStore()
@@ -40,6 +41,9 @@ export default function ModalGateway() {
 
     case 'activity':
       return <ActivityModal onClose={closeModal} />
+
+    case 'deleteBoard':
+      return <DeleteBoardModal boardId={modal.boardId} onClose={closeModal} />
 
     default:
       return null

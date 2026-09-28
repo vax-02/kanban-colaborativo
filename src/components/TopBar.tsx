@@ -17,6 +17,7 @@ import { Link, useParams } from 'react-router-dom'
 import { notices } from '../data/mock'
 import { useUiStore } from '../store/uiStore'
 import { useBoardsStore } from '../store/boardsStore'
+import { useAuthStore } from '../store/authStore'
 import type { BoardDetailDto } from '../lib/types'
 
 export default function TopBar() {
@@ -32,6 +33,7 @@ export default function TopBar() {
   const [readIds, setReadIds] = useState<Record<string, boolean>>({})
   const bellRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
+  const me = useAuthStore((s) => s.user)
 
   useEffect(() => {
     if (!boardId) return
@@ -211,7 +213,12 @@ export default function TopBar() {
           >
             <MoreHorizontal className="h-4 w-4" />
           </button>
-          {openMore && <MoreMenu onClose={() => setOpenMore(false)} />}
+          {openMore && (
+            <MoreMenu
+              isOwner={!!currentBoard && currentBoard.creadoPor.id === me?.id}
+              onClose={() => setOpenMore(false)}
+            />
+          )}
         </div>
       </div>
     </header>
@@ -286,11 +293,9 @@ function NotificationsPopover({
   )
 }
 
-function MoreMenu({ onClose }: { onClose: () => void }) {
+function MoreMenu({ onClose, isOwner }: { onClose: () => void; isOwner: boolean }) {
   const openModal = useUiStore((s) => s.openModal)
   const { boardId } = useParams()
-  const deleteBoard = useBoardsStore((s) => s.deleteBoard)
-  const [deleting, setDeleting] = useState(false)
 
   const items = [
     { icon: UserPlus, label: 'Añadir colaboradores', action: () => openModal({ type: 'collaborators', boardId: boardId as string | undefined }) },
@@ -315,22 +320,19 @@ function MoreMenu({ onClose }: { onClose: () => void }) {
         </button>
       ))}
       <div className="my-1.5 h-px bg-ink-100" />
-      <button
-        type="button"
-        disabled={!boardId || deleting}
-        onClick={() => {
-          if (!boardId) return
-          if (!window.confirm('¿Eliminar este tablero permanentemente?')) return
-          setDeleting(true)
-          deleteBoard(boardId)
-            .then(() => (window.location.href = '/tableros'))
-            .finally(() => setDeleting(false))
-        }}
-        className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed"
-      >
-        <Trash2 className="h-4 w-4" />
-        Eliminar tablero…
-      </button>
+      {isOwner && boardId && (
+        <button
+          type="button"
+          onClick={() => {
+            openModal({ type: 'deleteBoard', boardId })
+            onClose()
+          }}
+          className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"
+        >
+          <Trash2 className="h-4 w-4" />
+          Eliminar tablero…
+        </button>
+      )}
       <button
         type="button"
         onClick={() => {

@@ -8,6 +8,7 @@ export type ModalState =
   | { type: 'task'; taskId: string; columnId: string; boardId: string }
   | { type: 'filters' }
   | { type: 'activity' }
+  | { type: 'deleteBoard'; boardId: string }
   | null
 
 type UiStore = {

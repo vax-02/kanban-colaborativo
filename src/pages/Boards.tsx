@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom'
 import { AvatarStack } from '../components/Avatar'
 import { useBoardsStore } from '../store/boardsStore'
 import { useUiStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import { formatUpdated, isRecent, shortName } from '../lib/format'
 import type { BoardDto } from '../lib/types'
 
@@ -27,7 +28,6 @@ export default function Boards() {
     boards,
     loading,
     loadBoards,
-    deleteBoard,
     toggleFavorite,
     invites,
     loadInvitations,
@@ -36,6 +36,7 @@ export default function Boards() {
   } = useBoardsStore()
   const [tab, setTab] = useState<Tab>('todos')
   const [query, setQuery] = useState('')
+  const me = useAuthStore((s) => s.user)
 
   useEffect(() => {
     void loadBoards()
@@ -57,12 +58,10 @@ export default function Boards() {
     return matchQuery && matchTab
   })
 
-  const onDelete = async (e: React.MouseEvent, b: BoardDto) => {
+  const onDelete = (e: React.MouseEvent, b: BoardDto) => {
     e.preventDefault()
     e.stopPropagation()
-    if (window.confirm(`¿Eliminar el tablero «${b.nombre}»? Esta acción no se puede deshacer.`)) {
-      await deleteBoard(b.id)
-    }
+    openModal({ type: 'deleteBoard', boardId: b.id })
   }
 
   const onToggleFavorite = (e: React.MouseEvent, b: BoardDto) => {
@@ -288,14 +287,16 @@ export default function Boards() {
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => onDelete(e, b)}
-                    className="cursor-pointer rounded-md p-1.5 text-ink-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
-                    aria-label="Eliminar tablero"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {b.creadoPor.id === me?.id && (
+                    <button
+                      type="button"
+                      onClick={(e) => onDelete(e, b)}
+                      className="cursor-pointer rounded-md p-1.5 text-ink-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+                      aria-label="Eliminar tablero"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <div className="mt-2 flex items-center justify-between">
