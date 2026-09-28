@@ -9,7 +9,6 @@ import MyTasksPage from './pages/MyTasksPage'
 import CalendarPage from './pages/CalendarPage'
 import ChatPage from './pages/ChatPage'
 import NotificationsPage from './pages/NotificationsPage'
-import InboxPage from './pages/InboxPage'
 import MembersPage from './pages/MembersPage'
 import SettingsPage from './pages/SettingsPage'
 import { useAuthStore } from './store/authStore'
@@ -48,7 +47,6 @@ function App() {
         <Route path="/calendario" element={<CalendarPage />} />
         <Route path="/mensajes" element={<ChatPage />} />
         <Route path="/notificaciones" element={<NotificationsPage />} />
-        <Route path="/correo" element={<InboxPage />} />
         <Route path="/miembros" element={<MembersPage />} />
         <Route path="/ajustes" element={<SettingsPage />} />
       </Route>

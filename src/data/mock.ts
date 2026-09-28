@@ -313,67 +313,6 @@ export const notices: Notice[] = [
   },
 ]
 
-export type Mail = {
-  id: string
-  from: string
-  subject: string
-  preview: string
-  time: string
-  unread: boolean
-  attachment?: boolean
-  color: string
-}
-
-export const mails: Mail[] = [
-  {
-    id: 'm1',
-    from: 'Equipo Producto',
-    subject: 'Review de sprint — viernes 10:00',
-    preview: 'Agendamos la review con todo el equipo para revisar el último sprint…',
-    time: '9:40',
-    unread: true,
-    color: '#6366f1',
-  },
-  {
-    id: 'm2',
-    from: 'María López',
-    subject: 'Resultados de las pruebas de carga',
-    preview: 'Adjunto el reporte de las pruebas, los p90 están dentro del rango…',
-    time: '8:15',
-    unread: true,
-    attachment: true,
-    color: '#10b981',
-  },
-  {
-    id: 'm3',
-    from: 'Carlos Ruiz',
-    subject: 'Propuesta comercial actualizada — Q3',
-    preview: 'Actualicé el archivo con los nuevos precios de soporte…',
-    time: 'Ayer',
-    unread: true,
-    attachment: true,
-    color: '#f59e0b',
-  },
-  {
-    id: 'm4',
-    from: 'Ana García',
-    subject: 'Nuevo integrante en el tablero App móvil',
-    preview: 'Bienvenida a Sandra, se unió como Editor al tablero…',
-    time: 'Ayer',
-    unread: false,
-    color: '#ef4444',
-  },
-  {
-    id: 'm5',
-    from: 'Notificaciones TaskFlow',
-    subject: 'Resumen semanal de actividad',
-    preview: 'Este es el resumen de las tareas completadas esta semana…',
-    time: 'Lun',
-    unread: false,
-    color: '#94a3b8',
-  },
-]
-
 export type CalEvent = {
   id: string
   day: number
